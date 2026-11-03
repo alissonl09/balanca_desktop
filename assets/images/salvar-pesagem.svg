@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 306 346" role="img" aria-labelledby="title desc">
+  <title id="title">Salvar pesagem</title>
+  <desc id="desc">Ícone vetorial de disquete com marca de confirmação.</desc>
+  <g fill="none" stroke="#076A5A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M61 73h151l42 42v93"/>
+    <path d="M44 281V90a17 17 0 0 1 17-17"/>
+    <path d="M44 281h144"/>
+    <path d="M78 74v66a14 14 0 0 0 14 14h104"/>
+    <rect x="153" y="89" width="38" height="52" rx="5"/>
+    <path d="M79 281v-84a7 7 0 0 1 7-7h114a7 7 0 0 1 7 7v19"/>
+    <path d="M101 220h71"/>
+    <path d="M101 248h67"/>
+    <path d="M61 251v20"/>
+  </g>
+  <circle cx="232" cy="258" r="43" fill="none" stroke="#76C683" stroke-width="9"/>
+  <path d="M212 258l15 16 28-33" fill="none" stroke="#076A5A" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

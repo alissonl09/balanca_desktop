@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 334 326" role="img" aria-labelledby="title desc">
+  <title id="title">Imprimir pesagem</title>
+  <desc id="desc">Ícone vetorial de impressora com folha impressa.</desc>
+  <g fill="none" stroke="#076A5A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M101 84V69a17 17 0 0 1 17-17h84a17 17 0 0 1 17 17v15"/>
+    <path d="M98 225H69a27 27 0 0 1-27-27v-63a27 27 0 0 1 27-27h189a27 27 0 0 1 27 27v63a27 27 0 0 1-27 27h-36"/>
+    <path d="M94 219v-27h136v27"/>
+    <path d="M102 209v70h118v-70"/>
+    <path d="M127 219h67"/>
+    <path d="M127 246h45"/>
+  </g>
+  <circle cx="235" cy="137" r="11" fill="#76C683"/>
+</svg>

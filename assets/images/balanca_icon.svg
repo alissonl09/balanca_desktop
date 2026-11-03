@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 360" role="img" aria-labelledby="title desc">
+  <title id="title">Ícone de balança estilizada ajustada maior</title>
+  <desc id="desc">Balança de dois pratos em traço verde, sem fundo, com proporção um pouco maior e mais presença visual.</desc>
+
+  <g fill="none" stroke="#006B55" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Barra superior mais larga -->
+    <path d="M96 78h124"/>
+    <path d="M292 78h124"/>
+
+    <!-- Articulação central -->
+    <circle cx="256" cy="78" r="36"/>
+
+    <!-- Haste central -->
+    <path d="M256 114v164"/>
+
+    <!-- Base -->
+    <path d="M202 278h108c10 0 18 8 18 18v24H184v-24c0-10 8-18 18-18z"/>
+
+    <!-- Suporte esquerdo -->
+    <path d="M96 78v16"/>
+    <path d="M96 94L52 226"/>
+    <path d="M96 94l44 132"/>
+    <path d="M40 226h112"/>
+    <path d="M40 226c5 36 29 62 56 62s51-26 56-62"/>
+
+    <!-- Suporte direito -->
+    <path d="M416 78v16"/>
+    <path d="M416 94l-44 132"/>
+    <path d="M416 94l44 132"/>
+    <path d="M360 226h112"/>
+    <path d="M360 226c5 36 29 62 56 62s51-26 56-62"/>
+  </g>
+
+  <!-- Detalhe de destaque -->
+  <circle cx="256" cy="78" r="14" fill="none" stroke="#72C874" stroke-width="10"/>
+</svg>

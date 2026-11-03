@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 290 313" role="img" aria-labelledby="title desc">
+  <title id="title">Resumo da pesagem</title>
+  <desc id="desc">Ícone vetorial de documento com marca de confirmação.</desc>
+  <g fill="none" stroke="#076A5A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M43 251V94L94 46H214a5 5 0 0 1 5 5v132"/>
+    <path d="M43 94h51V46"/>
+    <path d="M79 138h103"/>
+    <path d="M79 167h89"/>
+    <path d="M79 196h70"/>
+    <path d="M43 251h116"/>
+  </g>
+  <circle cx="210" cy="233" r="43" fill="none" stroke="#76C683" stroke-width="9"/>
+  <path d="M190 233l15 16 28-33" fill="none" stroke="#076A5A" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
