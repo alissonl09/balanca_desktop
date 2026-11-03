@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'dart:io';
+import 'dart:async';
+
 import '../../core/indicators/indicator_models.dart';
 import 'settings_widgets.dart';
 
@@ -18,6 +21,8 @@ class IndicatorSettings extends StatefulWidget {
 
 class _IndicatorSettingsState extends State<IndicatorSettings> {
   String? _selected;
+  bool _testing = false;
+  String? _testResult;
   IndicatorConfiguration get config => widget.configuration;
   void change(VoidCallback callback) => config.update(callback);
 
@@ -87,7 +92,7 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
       children: [
         SettingsSection(
           title: 'Indicadores de Peso',
-          description: 'Configuração da instalação física · somente memória nesta sessão.',
+          description: 'Configuração da instalação física · rascunho local.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -97,8 +102,7 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
                     item.name.isEmpty ? 'Instalação sem nome' : item.name,
                   ),
                   subtitle: Text(
-                    config.model(item.modelCode)?.label ??
-                        'Modelo não selecionado',
+                    '${config.model(item.modelCode)?.label ?? 'Modelo não selecionado'} · ${item.connectionType?.label ?? 'Sem comunicação'}',
                   ),
                   selected: item.id == _selected,
                   leading: Icon(
@@ -211,7 +215,7 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
                         (v) => item.tcpPort = v,
                         helper: model?.tcp?.primaryPortReference == null
                             ? null
-                            : 'Referência primária 1701. Informe a porta real da instalação.',
+                            : 'Sugestão documental ${model?.tcp?.primaryPortReference}. A porta da instalação prevalece.',
                       ),
                       if (model?.tcp?.dhcp == true)
                         SettingsToggle(
@@ -303,6 +307,23 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
                         item.timeoutMs,
                         (v) => item.timeoutMs = v ?? 0,
                       ),
+                      if (item.connectionType == IndicatorConnectionType.tcp)
+                        _number(
+                          'indicator-reconnect',
+                          'Intervalo de reconexão (ms)',
+                          item.reconnectIntervalMs,
+                          (v) => item.reconnectIntervalMs = v ?? 0,
+                        ),
+                      if (item.connectionType ==
+                              IndicatorConnectionType.serial &&
+                          serial != null)
+                        _choice<int>(
+                          'indicator-stop-bits',
+                          'Stop Bits',
+                          item.stopBits,
+                          {for (final v in serial.stopBits) v: '$v'},
+                          (v) => item.stopBits = v,
+                        ),
                       _choice<String>(
                         'indicator-protocol',
                         'Protocolo / Tipo de saída',
@@ -318,24 +339,75 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
           ),
         ),
         const SizedBox(height: 16),
-        const SettingsSection(
+        SettingsSection(
           title: 'Diagnóstico do indicador',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Status: não conectado · diagnóstico não implementado'),
-              Text('Última leitura: -'),
-              Text('Última comunicação: -'),
-              Text('Último erro: -'),
-              OutlinedButton(
-                onPressed: null,
-                child: Text('Testar comunicação'),
+              Text(
+                _testResult ??
+                    'Teste abre uma conexão temporária e não inicia pesagem.',
+              ),
+              OutlinedButton.icon(
+                key: const ValueKey('test-indicator-connection'),
+                onPressed: _testing ? null : () => _testConnection(item, model),
+                icon: _testing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.network_check),
+                label: Text(_testing ? 'Testando...' : 'Testar conexão'),
               ),
             ],
           ),
         ),
       ],
     );
+  }
+
+  Future<void> _testConnection(
+    IndicatorInstallation item,
+    IndicatorModel? model,
+  ) async {
+    final errors = model == null
+        ? ['Selecione um modelo.']
+        : item.validate(model);
+    if (errors.isNotEmpty) {
+      setState(() => _testResult = errors.first);
+      return;
+    }
+    setState(() {
+      _testing = true;
+      _testResult = 'Conectando...';
+    });
+    String result;
+    try {
+      if (item.connectionType == IndicatorConnectionType.tcp) {
+        final socket = await Socket.connect(
+          item.host!,
+          item.tcpPort!,
+          timeout: Duration(milliseconds: item.timeoutMs),
+        );
+        await socket.close();
+        result = 'Conectado. Comunicação estabelecida; nenhum dado foi interpretado.';
+      } else {
+        result = 'Porta indisponível: transporte Serial Windows ainda não configurado.';
+      }
+    } on SocketException {
+      result = 'Host inacessível ou porta indisponível.';
+    } on TimeoutException {
+      result = 'Timeout ao conectar.';
+    } catch (_) {
+      result = 'Erro de configuração ou transporte.';
+    }
+    if (mounted) {
+      setState(() {
+        _testing = false;
+        _testResult = result;
+      });
+    }
   }
 
   Widget _text(

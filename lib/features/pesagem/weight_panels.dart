@@ -118,7 +118,11 @@ class WeightPanels extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       reading.connected
-                          ? (reading.stable ? 'Peso estável' : 'Peso instável')
+                          ? (reading.stable == null
+                                ? 'Estabilidade desconhecida'
+                                : reading.stable!
+                                ? 'Peso estável'
+                                : 'Peso instável')
                           : 'Indicador desconectado',
                       style: const TextStyle(fontSize: 12, color: Colors.white),
                     ),

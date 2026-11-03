@@ -152,14 +152,14 @@ void main() {
       expect(options<String>(tester, 'indicator-flow'), ['None', 'XON/XOFF']);
       await select(tester, 'indicator-channel', 'COM2');
       expect(options<String>(tester, 'indicator-interface-COM2'), ['RS-232']);
-      expect(find.text('Stop Bits'), findsNothing);
+      expect(options<int>(tester, 'indicator-stop-bits'), [1, 2]);
       expect(
         tester
             .widget<OutlinedButton>(
-              find.widgetWithText(OutlinedButton, 'Testar comunicação'),
+              find.widgetWithText(OutlinedButton, 'Testar conexão'),
             )
             .onPressed,
-        isNull,
+        isNotNull,
       );
       expect(tester.takeException(), isNull);
     },

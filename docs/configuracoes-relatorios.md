@@ -73,6 +73,30 @@ do layout oficial que será fornecido posteriormente.
 
 ## Relatórios
 
+## Indicadores de Peso
+
+`IndicatorModel` descreve o equipamento e as capacidades declaradas pelo perfil:
+transportes permitidos, parâmetros seriais e protocolos/formats de saída. O catálogo
+é extensível; modelos sem documentação permanecem sem capacidades selecionáveis.
+`IndicatorInstallation` guarda cada instalação local, incluindo nome, modelo,
+transporte, protocolo e parâmetros específicos. `toJson`/`fromJson` preservam os
+valores configurados para serialização local. Os parâmetros reais da instalação
+prevalecem sobre referências e exemplos; 1701 é apenas uma referência do perfil
+IND570.
+
+Transporte significa o caminho físico (Serial ou TCP/IP). `IndicatorTransport`
+recebe bytes; `IndicatorDriver` e seu parser interpretam o protocolo do modelo.
+`IndicatorReading` entrega peso, unidade, estabilidade opcional, estado de
+comunicação, instante da leitura e erro sem expor o transporte à Pesagem. Peso zero
+é válido e não sinaliza desconexão. Sem parser documentado, bytes não são
+convertidos em peso. TCP usa socket assíncrono; o backend Serial Windows está
+preparado por interface, mas ainda depende de uma dependência apropriada.
+
+O diagnóstico TCP abre e fecha uma conexão temporária e não dispara ações de
+pesagem. Não comprova que o indicador enviou um frame válido. O diagnóstico Serial
+retorna indisponibilidade até haver backend. A configuração da instalação é um
+rascunho local da estação, sem chamada à Libra-API.
+
 O menu usa `Icons.assessment_outlined` entre Cadastros e Configurações.
 `report_catalog.dart` define doze opções e seus filtros de apresentação:
 

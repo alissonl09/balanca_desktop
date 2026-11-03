@@ -147,6 +147,7 @@ void main() {
       ..dataBits = 7
       ..parity = 'Even'
       ..flowControl = 'None'
+      ..stopBits = 2
       ..physicalInterface = 'RS-232';
     expect(item.validate(ind570()), isEmpty);
   });
