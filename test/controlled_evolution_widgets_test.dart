@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'support/manual_capture_mocks.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -522,11 +524,22 @@ void main() {
   windowsTest(
     'Peso Manual exige justificativa por leitura e perfil do autorizador',
     (tester) async {
-      final settings = SettingsState();
+      final cameras = <MockWeighingCameraService>[];
+      final services = mockCaptureServices(
+        configured: true,
+        cameraFactory: () {
+          final camera = MockWeighingCameraService()..unavailable = true;
+          cameras.add(camera);
+          return camera;
+        },
+      );
+      // Each authorized reading owns its own physical camera session.
+      final settings = SettingsState(manualCapture: services);
       addTearDown(settings.dispose);
       final session = TicketSession();
       await mount(tester, settings, session: session);
       for (final reason in ['Falha na entrada', 'Falha na saída']) {
+        final previousSessions = cameras.length;
         await tester.sendKeyEvent(LogicalKeyboardKey.f11);
         await tester.pumpAndSettle();
         await tester.enterText(keyed('manual-user'), 'balanca');
@@ -546,6 +559,7 @@ void main() {
             findsOneWidget,
           );
           expect(keyed('manual-weight'), findsNothing);
+          expect(cameras.length, previousSessions);
         }
         settings.permissions.setGrant(2, AppPermission.authorizeManual, false);
         await tester.enterText(keyed('manual-justification'), reason);
@@ -555,7 +569,10 @@ void main() {
           findsOneWidget,
         );
         settings.permissions.setGrant(2, AppPermission.authorizeManual, true);
+        expect(cameras.length, previousSessions);
         await tap(tester, find.text('Liberar'));
+        expect(cameras.length, previousSessions + 1);
+        expect(cameras.last.starts, 1);
         await tester.enterText(
           keyed('manual-weight'),
           reason == 'Falha na entrada' ? '18500' : '8000',
@@ -577,6 +594,13 @@ void main() {
       expect(session.current!.summary.first, 18500);
       expect(session.current!.summary.second, 8000);
       expect(session.confirmed!.manualJustification, 'Falha na saída');
+      expect(cameras.every((camera) => camera.stops > 0), isTrue);
+      expect(
+        session.manualReadings.every(
+          (r) => r.evidence?.source.code == 'MANUAL_FALLBACK',
+        ),
+        isTrue,
+      );
     },
   );
 

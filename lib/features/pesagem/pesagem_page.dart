@@ -25,6 +25,8 @@ import 'pesagem_edit_service.dart';
 import 'pesagem_actions.dart';
 import 'pesagem_action_bar.dart';
 import 'manual_weighing_policy.dart';
+import 'manual_capture/capture_dialog.dart';
+import 'manual_capture/capture_models.dart';
 import '../access_control/access_control_panel.dart';
 import '../../core/permissions/permission_models.dart';
 
@@ -172,6 +174,7 @@ class _PesagemPageState extends State<PesagemPage> {
       capturedAt: _ticketSession.current?.capturedAt,
       manualOperator: _ticketSession.current?.manualOperator,
       manualJustification: _ticketSession.current?.manualJustification,
+      manualEvidence: _ticketSession.current?.manualEvidence,
     );
     final confirmed = _ticketSession.confirmed;
     if (confirmed != null &&
@@ -257,6 +260,7 @@ class _PesagemPageState extends State<PesagemPage> {
     _weighingFlowOpen = true;
     try {
       ManualAuthorization? authorization;
+      ManualWeighingEvidence? evidence;
       DateTime? capturedAt;
       double weight = 0; // Indicador atual desconectado, sem leitura real.
       if (manual) {
@@ -273,10 +277,15 @@ class _PesagemPageState extends State<PesagemPage> {
             )) {
           return;
         }
-        final manualWeight = await showManualWeightEntry(context);
-        if (!mounted || manualWeight == null) return;
-        weight = manualWeight;
-        capturedAt = DateTime.now();
+        evidence = await showManualCapture(
+          context,
+          authorization: authorization,
+          services: _settings.manualCapture,
+          plate: normalizePlate(_plate.text),
+        );
+        if (!mounted || evidence == null) return;
+        weight = evidence.finalWeight!;
+        capturedAt = evidence.dateTime;
       }
       final preview = WeighingPreview(
         plate: normalizePlate(_plate.text),
@@ -287,6 +296,7 @@ class _PesagemPageState extends State<PesagemPage> {
         manualOperator: authorization?.user,
         manualJustification: authorization?.justification,
         capturedAt: capturedAt,
+        manualEvidence: evidence,
       );
       final confirmed = await showWeighingConfirmation(context, preview);
       if (!mounted || confirmed != true) return;
@@ -332,7 +342,8 @@ class _PesagemPageState extends State<PesagemPage> {
       }
       _publishTicketData(commitOperation: true);
       _message(
-        'Pesagem de ${formatWeight(_lastConfirmedPreview!.currentWeight)} Kg confirmada em simulação local. Nenhum dado foi persistido.',
+        'Pesagem de ${formatWeight(_lastConfirmedPreview!.currentWeight)} Kg confirmada em simulação local. '
+        '${manual ? 'Auditoria da captura salva localmente. Nenhuma integração foi acionada.' : 'Nenhum dado foi persistido.'}',
       );
     } finally {
       _weighingFlowOpen = false;

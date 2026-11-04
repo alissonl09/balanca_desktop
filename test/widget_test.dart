@@ -1,5 +1,9 @@
 import 'dart:io';
 
+import 'package:balanca_desktop/features/pesagem/manual_capture/capture_dialog.dart';
+import 'package:balanca_desktop/features/pesagem/manual_capture/manual_capture_services.dart';
+import 'package:balanca_desktop/features/pesagem/manual_weighing_policy.dart';
+
 import 'package:balanca_desktop/core/permissions/permission_models.dart';
 
 import 'package:flutter/material.dart';
@@ -676,17 +680,21 @@ void main() {
       await tester.tap(find.text('Liberar'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('manual-authentication')), findsNothing);
-      expect(find.text('PESO MANUAL'), findsOneWidget);
-      await tester.tap(find.text('Prosseguir'));
-      await tester.pumpAndSettle();
-      expect(find.text('Informe um peso maior que zero.'), findsOneWidget);
+      expect(find.text('Pesagem Manual — Captura do Peso'), findsOneWidget);
+      expect(find.textContaining('Nenhuma câmera configurada.'), findsWidgets);
+      expect(
+        tester
+            .widget<ElevatedButton>(
+              find.widgetWithText(ElevatedButton, 'Prosseguir'),
+            )
+            .onPressed,
+        isNull,
+      );
       final manualWeight = find.byKey(const ValueKey('manual-weight'));
       await tester.enterText(manualWeight, '123abc');
-      expect(
-        tester.widget<TextFormField>(manualWeight).controller!.text,
-        isEmpty,
-      );
+      expect(tester.widget<TextField>(manualWeight).controller!.text, isEmpty);
       await tester.enterText(manualWeight, '12345,5');
+      await tester.pump();
       await tester.tap(find.text('Prosseguir'));
       await tester.pumpAndSettle();
       expect(
@@ -770,6 +778,7 @@ void main() {
         find.byKey(const ValueKey('manual-weight')),
         '1234.125',
       );
+      await tester.pump();
       await tester.tap(find.text('Prosseguir'));
       await tester.pumpAndSettle();
       expect(find.text('1234,125 Kg'), findsOneWidget);
@@ -811,7 +820,15 @@ void main() {
                   child: const Text('Autenticação'),
                 ),
                 TextButton(
-                  onPressed: () => showManualWeightEntry(context),
+                  onPressed: () => showManualCapture(
+                    context,
+                    authorization: ManualAuthorization(
+                      user: 'balanca',
+                      justification: 'Teste de layout autorizado',
+                    ),
+                    services: ManualCaptureServices.current,
+                    plate: 'ABC1D23',
+                  ),
                   child: const Text('Entrada'),
                 ),
                 TextButton(

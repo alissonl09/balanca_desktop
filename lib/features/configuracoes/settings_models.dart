@@ -4,6 +4,7 @@ import '../../core/indicators/indicator_models.dart';
 import '../../core/indicators/indicator_driver.dart';
 import '../../core/permissions/permission_models.dart';
 import '../access_control/access_control_state.dart';
+import '../pesagem/manual_capture/manual_capture_services.dart';
 
 enum StationEnvironment {
   producao('Produção'),
@@ -90,9 +91,13 @@ class PrintSettings {
 
 /// Rascunho local de apresentação, sem persistência ou efeito nas integrações.
 class SettingsState extends ChangeNotifier {
-  SettingsState({GateEquipmentSource? gateEquipmentSource})
-    : gateEquipmentSource =
-          gateEquipmentSource ?? const MockGateEquipmentSource();
+  SettingsState({
+    GateEquipmentSource? gateEquipmentSource,
+    ManualCaptureServices? manualCapture,
+  }) : gateEquipmentSource =
+           gateEquipmentSource ?? const MockGateEquipmentSource(),
+       manualCapture = manualCapture ?? ManualCaptureServices.current;
+  final ManualCaptureServices manualCapture;
   final GateEquipmentSource gateEquipmentSource;
   bool manualWeighingEnabled = true;
   final indicators = IndicatorConfiguration();

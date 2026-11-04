@@ -12,6 +12,7 @@ import 'settings_widgets.dart';
 import '../ticket/ticket_session.dart';
 import 'indicator_settings.dart';
 import 'permissions_settings.dart';
+import 'manual_webcam_settings.dart';
 import '../../core/permissions/permission_models.dart';
 import '../access_control/access_control_state.dart';
 
@@ -255,7 +256,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               ),
               const SizedBox(height: 16),
               const Text(
-                'Configuração local de demonstração • sem persistência definitiva.',
+                'A webcam é salva nesta estação. As demais configurações são de demonstração, mantidas na sessão.',
                 style: TextStyle(fontSize: 12, color: AppColors.muted),
               ),
               const SizedBox(height: 12),
@@ -363,6 +364,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               settings.update(() => settings.integratedSgv = value),
         ),
       ),
+      const SizedBox(height: 16),
+      ManualWebcamSettings(services: settings.manualCapture),
     ],
   );
 

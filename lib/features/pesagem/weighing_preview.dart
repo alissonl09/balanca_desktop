@@ -1,3 +1,5 @@
+import 'manual_capture/capture_models.dart';
+
 /// Estado de apresentação. Não representa um contrato da Libra-API.
 class WeighingSummary {
   const WeighingSummary({
@@ -34,6 +36,7 @@ class WeighingPreview {
     this.manualOperator,
     this.capturedAt,
     this.manualJustification,
+    this.manualEvidence,
   }) : operation = Map.unmodifiable(operation);
 
   final String plate, trailer;
@@ -42,6 +45,7 @@ class WeighingPreview {
   final WeighingSummary summary;
   final String? manualOperator;
   final String? manualJustification;
+  final ManualWeighingEvidence? manualEvidence;
   final DateTime? capturedAt;
   bool get isManual => manualOperator != null;
 }
@@ -54,6 +58,7 @@ class ManualReadingRecord {
       weight = preview.currentWeight,
       authorizer = preview.manualOperator ?? '',
       justification = preview.manualJustification?.trim() ?? '',
+      evidence = preview.manualEvidence,
       readAt = preview.capturedAt {
     if (!preview.isManual || justification.isEmpty || readAt == null) {
       throw ArgumentError(
@@ -63,6 +68,7 @@ class ManualReadingRecord {
   }
   final String plate, authorizer, justification;
   final double weight;
+  final ManualWeighingEvidence? evidence;
   final DateTime? readAt;
 }
 
