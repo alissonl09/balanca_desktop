@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import 'capture_models.dart';
@@ -14,9 +15,18 @@ abstract interface class WeighingCameraService {
   Future<void> stop();
 }
 
-class DesktopWeighingCameraService implements WeighingCameraService {
+abstract interface class WeighingCameraGeometry {
+  double get previewAspectRatio;
+}
+
+class DesktopWeighingCameraService
+    implements WeighingCameraService, WeighingCameraGeometry {
+  DesktopWeighingCameraService({this.mirrorHorizontally = false});
+  final bool mirrorHorizontally;
   CameraController? _controller;
   bool _stopped = false;
+  @override
+  double get previewAspectRatio => _controller?.value.aspectRatio ?? 16 / 9;
   @override
   Future<List<WeighingCamera>> listCameras() async {
     try {
@@ -114,7 +124,10 @@ class DesktopWeighingCameraService implements WeighingCameraService {
             ),
           );
         }
-        return CameraPreview(controller);
+        return UnmirroredCameraPreview(
+          mirrorHorizontally: mirrorHorizontally,
+          child: CameraPreview(controller),
+        );
       },
     );
   }
@@ -151,7 +164,11 @@ class DesktopWeighingCameraService implements WeighingCameraService {
       );
       final capturedAt = DateTime.now();
       try {
-        return CapturedPhoto(await photo.readAsBytes(), capturedAt);
+        return CapturedPhoto(
+          await photo.readAsBytes(),
+          capturedAt,
+          mirrorHorizontally: mirrorHorizontally,
+        );
       } finally {
         final temporary = File(photo.path);
         if (await temporary.exists()) await temporary.delete();
@@ -174,5 +191,28 @@ class DesktopWeighingCameraService implements WeighingCameraService {
     } catch (_) {
       /* Device may be unplugged. */
     }
+  }
+}
+
+/// camera_windows 0.3.0+1 mirrors only its native preview texture, with no
+/// public Dart setter. Its photo sink does not apply that software mirror.
+/// Cancel it here; apply any explicit driver adjustment to BOTH paths.
+class UnmirroredCameraPreview extends StatelessWidget {
+  const UnmirroredCameraPreview({
+    super.key,
+    required this.child,
+    this.mirrorHorizontally = false,
+  });
+  final Widget child;
+  final bool mirrorHorizontally;
+
+  @override
+  Widget build(BuildContext context) {
+    final pluginMirrorsPreview =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+    return Transform.flip(
+      flipX: pluginMirrorsPreview != mirrorHorizontally,
+      child: child,
+    );
   }
 }

@@ -10,19 +10,59 @@ class WebcamConfiguration {
     this.enabled = true,
     this.cameraId,
     this.cameraName,
+    this.mirrorHorizontally = false,
+    this.region = const DisplayRegion(),
+    this.minimumWeight = 0,
+    this.maximumWeight = 100000,
+    this.diagnostics = false,
   });
+  final DisplayRegion region;
+  final double minimumWeight, maximumWeight;
+  final bool diagnostics;
+  WebcamConfiguration copyWith({
+    bool? enabled,
+    String? cameraId,
+    String? cameraName,
+    bool? mirrorHorizontally,
+    DisplayRegion? region,
+    double? minimumWeight,
+    double? maximumWeight,
+    bool? diagnostics,
+  }) => WebcamConfiguration(
+    enabled: enabled ?? this.enabled,
+    cameraId: cameraId ?? this.cameraId,
+    cameraName: cameraName ?? this.cameraName,
+    mirrorHorizontally: mirrorHorizontally ?? this.mirrorHorizontally,
+    region: region ?? this.region,
+    minimumWeight: minimumWeight ?? this.minimumWeight,
+    maximumWeight: maximumWeight ?? this.maximumWeight,
+    diagnostics: diagnostics ?? this.diagnostics,
+  );
   final bool enabled;
+  final bool mirrorHorizontally;
   final String? cameraId, cameraName;
   Map<String, Object?> toJson() => {
     'enabled': enabled,
     'cameraId': cameraId,
     'cameraName': cameraName,
+    'mirrorHorizontally': mirrorHorizontally,
+    'region': region.toJson(),
+    'minimumWeight': minimumWeight,
+    'maximumWeight': maximumWeight,
+    'diagnostics': diagnostics,
   };
   factory WebcamConfiguration.fromJson(Map<String, dynamic> json) =>
       WebcamConfiguration(
         enabled: json['enabled'] == true,
         cameraId: json['cameraId'] as String?,
         cameraName: json['cameraName'] as String?,
+        mirrorHorizontally: json['mirrorHorizontally'] == true,
+        region: json['region'] is Map
+            ? DisplayRegion.fromJson(Map<String, dynamic>.from(json['region']))
+            : const DisplayRegion(),
+        minimumWeight: (json['minimumWeight'] as num?)?.toDouble() ?? 0,
+        maximumWeight: (json['maximumWeight'] as num?)?.toDouble() ?? 100000,
+        diagnostics: json['diagnostics'] == true,
       );
 }
 
@@ -51,9 +91,17 @@ class CaptureFailure implements Exception {
 }
 
 class CapturedPhoto {
-  const CapturedPhoto(this.bytes, this.capturedAt);
+  const CapturedPhoto(
+    this.bytes,
+    this.capturedAt, {
+    this.mirrorHorizontally = false,
+  });
   final Uint8List bytes;
   final DateTime capturedAt;
+
+  /// Explicit station correction for a driver that mirrors captured pixels.
+  /// Applied after EXIF, independently of the plugin's preview-only mirror.
+  final bool mirrorHorizontally;
 }
 
 /// Normalized region, shared by the preview and image processor.
@@ -65,6 +113,23 @@ class DisplayRegion {
     this.height = .5,
   });
   final double left, top, width, height;
+  bool get valid =>
+      [left, top, width, height].every((v) => v.isFinite) &&
+      left >= 0 &&
+      top >= 0 &&
+      width >= .02 &&
+      height >= .02 &&
+      left + width <= 1.000001 &&
+      top + height <= 1.000001;
+  factory DisplayRegion.fromJson(Map<String, dynamic> json) {
+    final region = DisplayRegion(
+      left: (json['left'] as num?)?.toDouble() ?? .1,
+      top: (json['top'] as num?)?.toDouble() ?? .25,
+      width: (json['width'] as num?)?.toDouble() ?? .8,
+      height: (json['height'] as num?)?.toDouble() ?? .5,
+    );
+    return region.valid ? region : const DisplayRegion();
+  }
   Map<String, double> toJson() => {
     'left': left,
     'top': top,
@@ -79,7 +144,13 @@ class WeightOcrResult {
     this.weight,
     this.confidence = 0,
     this.error,
+    this.attempts = const [],
+    this.strategy = '',
+    this.engineMessage,
   });
+  final List<OcrAttempt> attempts;
+  final String strategy;
+  final String? engineMessage;
   final String rawText;
   final double? weight;
   final double confidence;
@@ -89,10 +160,24 @@ class WeightOcrResult {
       error == null &&
       weight != null &&
       weight!.isFinite &&
-      weight! >= 0 &&
       confidence.isFinite &&
       confidence >= threshold &&
       confidence <= 1;
+}
+
+class OcrAttempt {
+  const OcrAttempt(this.strategy, this.image, this.result);
+  final String strategy;
+  final Uint8List image;
+  final WeightOcrResult result;
+  Map<String, Object?> toJson() => {
+    'strategy': strategy,
+    'rawText': result.rawText,
+    'confidence': result.confidence,
+    'parsedWeight': result.weight,
+    'failureReason': result.error,
+    'engineMessage': result.engineMessage,
+  };
 }
 
 class ManualWeighingEvidence {
@@ -112,7 +197,9 @@ class ManualWeighingEvidence {
     this.confirmedAt,
     this.plate = '',
     this.region = const DisplayRegion(),
+    this.stableReadings = 0,
   });
+  final int stableReadings;
   final String id, authorizer, justification, plate;
   final DateTime dateTime;
   final DateTime? confirmedAt;
@@ -138,6 +225,8 @@ class ManualWeighingEvidence {
     'ocrWeight': ocr.weight,
     'confidence': ocr.confidence,
     'ocrError': ocr.error,
+    'ocrStrategy': ocr.strategy,
+    'ocrAttempts': ocr.attempts.map((a) => a.toJson()).toList(),
     'finalWeight': finalWeight,
     'weightSource': source.code,
     'failureReason': failureReason,
@@ -145,6 +234,9 @@ class ManualWeighingEvidence {
     'authorizer': authorizer,
     'justification': justification,
     'region': region.toJson(),
+    'ocrStableReadings': stableReadings,
+    'ocrRequiredReadings': 3,
+    'ocrEngineMessage': ocr.engineMessage,
   };
 }
 

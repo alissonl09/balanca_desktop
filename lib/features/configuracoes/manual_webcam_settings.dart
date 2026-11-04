@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../pesagem/manual_capture/camera_service.dart';
 import '../pesagem/manual_capture/capture_dialog.dart';
@@ -75,8 +76,11 @@ class _ManualWebcamSettingsState extends State<ManualWebcamSettings> {
     final camera = widget.services.cameraFactory();
     await showDialog<void>(
       context: context,
-      builder: (_) =>
-          CameraDiagnosticDialog(camera: camera, cameraId: _config.cameraId!),
+      builder: (_) => CameraDiagnosticDialog(
+        camera: camera,
+        cameraId: _config.cameraId!,
+        region: _config.region,
+      ),
     );
   }
 
@@ -95,10 +99,11 @@ class _ManualWebcamSettingsState extends State<ManualWebcamSettings> {
             onChanged: _saving
                 ? null
                 : (v) => _save(
-                    WebcamConfiguration(
+                    _config.copyWith(
                       enabled: v,
                       cameraId: _config.cameraId,
                       cameraName: _config.cameraName,
+                      mirrorHorizontally: _config.mirrorHorizontally,
                     ),
                   ),
           ),
@@ -127,14 +132,120 @@ class _ManualWebcamSettingsState extends State<ManualWebcamSettings> {
                   : (id) {
                       final camera = _cameras.firstWhere((c) => c.id == id);
                       _save(
-                        WebcamConfiguration(
+                        _config.copyWith(
                           enabled: _config.enabled,
                           cameraId: camera.id,
                           cameraName: camera.name,
+                          mirrorHorizontally: _config.mirrorHorizontally,
                         ),
                       );
                     },
             ),
+          SwitchListTile(
+            title: const Text('Inverter horizontalmente'),
+            subtitle: const Text(
+              'Ative somente se o driver entregar o visor invertido. '
+              'Aplica ao preview, OCR e foto salva.',
+            ),
+            value: _config.mirrorHorizontally,
+            onChanged: _saving
+                ? null
+                : (value) => _save(
+                    _config.copyWith(
+                      enabled: _config.enabled,
+                      cameraId: _config.cameraId,
+                      cameraName: _config.cameraName,
+                      mirrorHorizontally: value,
+                    ),
+                  ),
+          ),
+          ExpansionTile(
+            title: const Text('Ajustar ROI e validação OCR'),
+            children: [
+              const Text(
+                'ROI: enquadre somente o peso principal, sem tara, capacidade ou ícones.',
+              ),
+              for (final field in ['X', 'Y', 'Largura', 'Altura'])
+                TextFormField(
+                  key: ValueKey('roi-$field-${_config.region.toJson()}'),
+                  initialValue: switch (field) {
+                    'X' => _config.region.left.toString(),
+                    'Y' => _config.region.top.toString(),
+                    'Largura' => _config.region.width.toString(),
+                    _ => _config.region.height.toString(),
+                  },
+                  decoration: InputDecoration(labelText: 'ROI $field (0 a 1)'),
+                  onFieldSubmitted: _saving
+                      ? null
+                      : (text) {
+                          final v = double.tryParse(text.replaceAll(',', '.'));
+                          if (v == null) return;
+                          final r = _config.region;
+                          final next = DisplayRegion(
+                            left: field == 'X' ? v : r.left,
+                            top: field == 'Y' ? v : r.top,
+                            width: field == 'Largura' ? v : r.width,
+                            height: field == 'Altura' ? v : r.height,
+                          );
+                          if (next.valid) {
+                            _save(_config.copyWith(region: next));
+                          } else {
+                            setState(
+                              () => _error = 'ROI deve ficar dentro da imagem. Reduza largura/altura antes de mover.',
+                            );
+                          }
+                        },
+                ),
+              for (final minimum in [true, false])
+                TextFormField(
+                  key: ValueKey(
+                    'range-$minimum-${_config.minimumWeight}-${_config.maximumWeight}',
+                  ),
+                  initialValue:
+                      (minimum ? _config.minimumWeight : _config.maximumWeight)
+                          .toString(),
+                  decoration: InputDecoration(
+                    labelText: minimum
+                        ? 'Peso mínimo OCR (kg)'
+                        : 'Peso máximo OCR (kg)',
+                  ),
+                  onFieldSubmitted: _saving
+                      ? null
+                      : (text) {
+                          final v = double.tryParse(text.replaceAll(',', '.'));
+                          if (v == null ||
+                              !v.isFinite ||
+                              v < 0 ||
+                              (minimum
+                                  ? v > _config.maximumWeight
+                                  : v < _config.minimumWeight)) {
+                            setState(() => _error = 'Faixa de peso inválida.');
+                            return;
+                          }
+                          _save(
+                            _config.copyWith(
+                              minimumWeight: minimum ? v : null,
+                              maximumWeight: minimum ? null : v,
+                            ),
+                          );
+                        },
+                ),
+              const Text(
+                'Pressione Enter em cada campo para salvar nesta estação.',
+              ),
+              if (kDebugMode)
+                SwitchListTile(
+                  title: const Text('Diagnóstico OCR'),
+                  subtitle: const Text(
+                    'Mostra imagens e resultados na captura de Pesagem Manual, somente em debug.',
+                  ),
+                  value: _config.diagnostics,
+                  onChanged: _saving
+                      ? null
+                      : (v) => _save(_config.copyWith(diagnostics: v)),
+                ),
+            ],
+          ),
           if (!found && _config.cameraId != null)
             Text(
               'Webcam configurada indisponível: ${_config.cameraName ?? _config.cameraId}',

@@ -15,12 +15,16 @@ class ManualCaptureServices {
   }) : processor = processor ?? LocalCaptureImageProcessor();
   factory ManualCaptureServices.local() {
     final store = LocalManualWeighingStore();
-    return ManualCaptureServices(
-      cameraFactory: DesktopWeighingCameraService.new,
+    late final ManualCaptureServices services;
+    services = ManualCaptureServices(
+      cameraFactory: () => DesktopWeighingCameraService(
+        mirrorHorizontally: services.configuration.mirrorHorizontally,
+      ),
       ocr: TesseractWeightOcrService(),
       evidenceStore: store,
       configurationStore: store,
     );
+    return services;
   }
   static ManualCaptureServices current = ManualCaptureServices.local();
   final WeighingCameraService Function() cameraFactory;
@@ -39,6 +43,13 @@ class ManualCaptureServices {
   }
 
   Future<void> configure(WebcamConfiguration value) async {
+    if (!value.region.valid ||
+        !value.minimumWeight.isFinite ||
+        !value.maximumWeight.isFinite ||
+        value.minimumWeight < 0 ||
+        value.minimumWeight > value.maximumWeight) {
+      throw ArgumentError('ROI ou faixa de peso inválida');
+    }
     await configurationStore.saveConfiguration(value);
     configuration = value;
     configurationError = null;

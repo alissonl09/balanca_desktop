@@ -55,10 +55,17 @@ class MockWeightOcrService implements WeightOcrService {
   );
   Future<WeightOcrResult> Function()? pending;
   int calls = 0;
+  final List<WeightOcrResult> sequence = [];
+  Uint8List? lastImage;
   @override
   Future<WeightOcrResult> recognize(Uint8List image) async {
     calls++;
-    return pending == null ? result : await pending!();
+    lastImage = image;
+    return sequence.isNotEmpty
+        ? sequence.removeAt(0)
+        : pending == null
+        ? result
+        : await pending!();
   }
 }
 

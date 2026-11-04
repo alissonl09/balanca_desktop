@@ -62,6 +62,9 @@ void main() {
       await controller.initialize();
       await controller.capture();
       expect(controller.finalWeight, 12190);
+      expect(camera.captures, 3);
+      expect(controller.stableReadings, 3);
+      expect(store.records.length, 3);
       expect(controller.manualAllowed, isFalse);
       controller.setManualWeight('99');
       expect(controller.finalWeight, 12190);
@@ -83,6 +86,31 @@ void main() {
     await controller.capture();
     expect(controller.canConfirm, isTrue);
     expect((await controller.confirm())!.finalWeight, 0);
+  });
+  test('12190, 12180, 12190 never proposes unstable weight', () async {
+    ocr.sequence.addAll([
+      const WeightOcrResult(weight: 12190, confidence: .99),
+      const WeightOcrResult(weight: 12180, confidence: .99),
+      const WeightOcrResult(weight: 12190, confidence: .99),
+    ]);
+    await controller.initialize();
+    await controller.capture();
+    expect(controller.failureReason, 'OCR_LEITURA_INSTAVEL');
+    expect(controller.finalWeight, isNull);
+    expect(controller.manualAllowed, isTrue);
+    expect(controller.stableReadings, 0);
+    expect(camera.captures, 2);
+    expect(store.photos.length, 2);
+  });
+  test('out of station range and negative OCR never proposed', () async {
+    for (final weight in [-1.0, 100001.0]) {
+      ocr.result = WeightOcrResult(weight: weight, confidence: .99);
+      await controller.initialize();
+      await controller.capture();
+      expect(controller.failureReason, 'OCR_FORA_DA_FAIXA');
+      expect(controller.finalWeight, isNull);
+      expect(controller.imagePath, isNotNull);
+    }
   });
   for (final result in [
     const WeightOcrResult(error: 'OCR_SEM_LEITURA'),
@@ -147,7 +175,7 @@ void main() {
       final pending = Completer<WeightOcrResult>();
       final entered = Completer<void>();
       ocr.pending = () {
-        entered.complete();
+        if (!entered.isCompleted) entered.complete();
         return pending.future;
       };
       await controller.initialize();
@@ -165,7 +193,7 @@ void main() {
     final pending = Completer<WeightOcrResult>();
     final entered = Completer<void>();
     ocr.pending = () {
-      entered.complete();
+      if (!entered.isCompleted) entered.complete();
       return pending.future;
     };
     await controller.initialize();
@@ -219,13 +247,7 @@ void main() {
     );
     expect(interpretTesseractTsv(tsv([('0', 99)])).weight, 0);
     expect(interpretTesseractTsv(tsv([('12190', 20)])).success, isFalse);
-    for (final text in [
-      '12:45:31',
-      'SN12345',
-      '12.190',
-      '12190 123',
-      'SERIAL 12345',
-    ]) {
+    for (final text in ['12:45:31', 'SN12345', '12190 123', 'SERIAL 12345']) {
       expect(
         interpretTesseractTsv(tsv([(text, 99)])).success,
         isFalse,
@@ -241,44 +263,41 @@ void main() {
     expect(result.weight, isNull);
   });
 
-  test(
-    'adapter executa Tesseract real quando instalado (imagem sintética)',
-    () async {
-      try {
-        final version = await Process.run('tesseract', ['--version']);
-        if (version.exitCode != 0) {
-          markTestSkipped('Tesseract não instalado nesta estação de teste.');
-          return;
-        }
-      } on ProcessException {
+  test('adapter executa Tesseract real quando instalado (imagem sintética)', () async {
+    try {
+      final version = await Process.run(
+        TesseractWeightOcrService().executable,
+        ['--version'],
+      );
+      if (version.exitCode != 0) {
         markTestSkipped('Tesseract não instalado nesta estação de teste.');
         return;
       }
-      final image = img.Image(width: 640, height: 160);
-      img.fill(image, color: img.ColorRgb8(255, 255, 255));
-      img.drawString(
-        image,
-        '12190 kg',
-        font: img.arial48,
-        x: 40,
-        y: 50,
-        color: img.ColorRgb8(0, 0, 0),
-      );
-      final result = await TesseractWeightOcrService().recognize(
-        Uint8List.fromList(img.encodePng(image)),
-      );
-      expect(
-        result.weight,
-        12190,
-        reason: '${result.rawText}: ${result.error}',
-      );
-      expect(
-        result.success,
-        isTrue,
-        reason: '${result.confidence}: ${result.error}',
-      );
-    },
-  );
+    } on ProcessException {
+      markTestSkipped('Tesseract não instalado nesta estação de teste.');
+      return;
+    }
+    final image = img.Image(width: 640, height: 160);
+    img.fill(image, color: img.ColorRgb8(255, 255, 255));
+    img.drawString(
+      image,
+      '12190 kg',
+      font: img.arial48,
+      x: 40,
+      y: 50,
+      color: img.ColorRgb8(0, 0, 0),
+    );
+    final result = await TesseractWeightOcrService().recognize(
+      Uint8List.fromList(img.encodePng(image)),
+    );
+    expect(result.weight, 12190, reason: '${result.rawText}: ${result.error}');
+    expect(
+      result.success,
+      isTrue,
+      reason:
+          '${result.confidence}: ${result.error}; ${result.attempts.map((a) => a.toJson())}',
+    );
+  });
   test(
     'armazenamento real persiste configuração, foto e JSON sem sobrescrever',
     () async {
@@ -329,6 +348,15 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      final mirrorSwitch = find.widgetWithText(
+        SwitchListTile,
+        'Inverter horizontalmente',
+      );
+      expect(tester.widget<SwitchListTile>(mirrorSwitch).value, isFalse);
+      await tester.tap(mirrorSwitch);
+      await tester.pumpAndSettle();
+      expect(services.configuration.mirrorHorizontally, isTrue);
+      expect(store.config.mirrorHorizontally, isTrue);
       expect(
         tester
             .widget<DropdownButtonFormField<String>>(

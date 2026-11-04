@@ -6,6 +6,8 @@ import '../manual_weighing_policy.dart';
 import 'camera_service.dart';
 import 'capture_models.dart';
 import 'manual_capture_services.dart';
+import 'image_processor.dart';
+import 'tesseract_runtime.dart';
 
 class ManualCaptureController extends ChangeNotifier {
   ManualCaptureController({
@@ -19,7 +21,9 @@ class ManualCaptureController extends ChangeNotifier {
   final WeighingCameraService camera;
   final WebcamConfiguration configuration;
   final String plate;
-  final region = const DisplayRegion();
+  DisplayRegion get region => configuration.region;
+  ProcessedCapture? diagnosticCapture;
+  int stableReadings = 0;
   CaptureStage stage = CaptureStage.cameraInitializing;
   String message = 'Inicializando câmera';
   String? failureReason, photoFailureReason, imagePath, persistenceError;
@@ -108,41 +112,94 @@ class ManualCaptureController extends ChangeNotifier {
     manualWeight = null;
     // Keep the most recent saved photograph if a subsequent capture fails.
     ocr = const WeightOcrResult();
+    stableReadings = 0;
+    diagnosticCapture = null;
     try {
-      final photo = await camera.capture();
-      if (_closed) return;
-      final processed = await services.processor.process(photo, region);
-      if (_closed) return;
-      final id = newId(photo.capturedAt);
-      final path = await services.evidenceStore.savePhoto(
-        id,
-        processed.evidence,
-      );
-      attemptId = id;
-      imagePath = path;
-      capturedAt = photo.capturedAt;
-      photoFailureReason = null;
-      persistenceError = null;
-      if (_closed) return;
-      _update(CaptureStage.ocrProcessing, 'Analisando visor...');
-      ocr = await services.ocr.recognize(processed.ocrInput);
-      if (_closed) return;
-      failureReason = ocr.success
-          ? null
-          : ocr.error ??
-                (ocr.weight != null
-                    ? 'OCR_BAIXA_CONFIANCA'
-                    : 'OCR_SEM_LEITURA');
-      // Every successful photo/OCR attempt has its own immutable audit record.
-      await services.evidenceStore.save(_evidence(id: id, weight: null));
-      if (_closed) return;
-      if (ocr.success) {
-        _update(CaptureStage.ocrSuccess, 'Leitura realizada pela câmera');
-      } else {
-        _fallback(
-          failureReason!,
-          'Informe o peso manual. A foto foi preservada.',
+      double? previousWeight;
+      for (var frame = 0; frame < 3; frame++) {
+        if (_closed) return;
+        final photo = await camera.capture();
+        if (_closed) return;
+        final processed = await services.processor.process(photo, region);
+        if (kDebugMode && configuration.diagnostics) {
+          diagnosticCapture = processed;
+        }
+        if (_closed) return;
+        final id = newId(photo.capturedAt);
+        final path = await services.evidenceStore.savePhoto(
+          id,
+          processed.evidence,
         );
+        attemptId = id;
+        imagePath = path;
+        capturedAt = photo.capturedAt;
+        photoFailureReason = null;
+        persistenceError = null;
+        if (_closed) return;
+        _update(
+          CaptureStage.ocrProcessing,
+          'Analisando visor... ${frame + 1}/3',
+        );
+        ocr = await services.ocr.recognize(processed.ocrInput);
+        if (_closed) return;
+        if (ocr.success &&
+            (ocr.weight! < configuration.minimumWeight ||
+                ocr.weight! > configuration.maximumWeight ||
+                ocr.weight! < 0)) {
+          ocr = WeightOcrResult(
+            rawText: ocr.rawText,
+            weight: ocr.weight,
+            confidence: ocr.confidence,
+            error: 'OCR_FORA_DA_FAIXA',
+            strategy: ocr.strategy,
+            attempts: ocr.attempts,
+          );
+        } else if (ocr.success &&
+            previousWeight != null &&
+            previousWeight != ocr.weight) {
+          ocr = WeightOcrResult(
+            rawText: ocr.rawText,
+            weight: ocr.weight,
+            confidence: ocr.confidence,
+            error: 'OCR_LEITURA_INSTAVEL',
+            strategy: ocr.strategy,
+            attempts: ocr.attempts,
+          );
+        }
+        if (kDebugMode && configuration.diagnostics) {
+          for (final attempt in ocr.attempts) {
+            debugPrint('OCR ${attempt.toJson()}');
+          }
+          debugPrint(
+            'OCR rawText: ${ocr.rawText}; confidence: ${ocr.confidence}; '
+            'parsedWeight: ${ocr.weight}; preprocessingStrategy: ${ocr.strategy}; '
+            'failureReason: ${ocr.error}; frame: ${frame + 1}/3',
+          );
+        }
+        stableReadings = ocr.success ? frame + 1 : 0;
+        failureReason = ocr.success
+            ? null
+            : ocr.error ??
+                  (ocr.weight != null
+                      ? 'OCR_BAIXA_CONFIANCA'
+                      : 'OCR_SEM_LEITURA');
+        // Every successful photo/OCR attempt has its own immutable audit record.
+        await services.evidenceStore.save(_evidence(id: id, weight: null));
+        if (_closed) return;
+        if (ocr.success) {
+          previousWeight = ocr.weight;
+          if (frame == 2) {
+            _update(CaptureStage.ocrSuccess, 'Leitura confirmada pela câmera');
+          } else {
+            await Future<void>.delayed(const Duration(milliseconds: 200));
+          }
+        } else {
+          _fallback(
+            failureReason!,
+            '${ocrFailureMessage(failureReason)} Informe o peso manual. A foto foi preservada. Código: $failureReason.',
+          );
+          return;
+        }
       }
     } catch (error) {
       if (_closed) return;
@@ -188,6 +245,7 @@ class ManualCaptureController extends ChangeNotifier {
         ? photoFailureReason ?? failureReason
         : photoFailureReason,
     region: region,
+    stableReadings: stableReadings,
   );
 
   Future<ManualWeighingEvidence?> confirm() async {

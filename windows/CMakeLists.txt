@@ -72,6 +72,17 @@ endif()
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
+# Prepared on the build machine; no OCR installation required on the station.
+set(OCR_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/windows/tesseract")
+if(EXISTS "${OCR_RUNTIME_DIR}/tesseract.exe" AND EXISTS "${OCR_RUNTIME_DIR}/tessdata/eng.traineddata")
+  install(DIRECTORY "${OCR_RUNTIME_DIR}/" DESTINATION "${CMAKE_INSTALL_PREFIX}/ocr"
+    COMPONENT Runtime)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/windows/LEIA-ME-ESTACAO.txt"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
+else()
+  message(WARNING "OCR runtime missing. Run tool/prepare_windows_ocr.ps1 before distributing this build.")
+endif()
+
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 

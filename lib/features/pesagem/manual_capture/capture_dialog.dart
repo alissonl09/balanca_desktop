@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 
 import '../manual_weighing_policy.dart';
 import '../weighing_preview.dart';
@@ -79,6 +80,26 @@ class _ManualCaptureDialogState extends State<ManualCaptureDialog> {
             const SizedBox(height: 12),
             if (c.busy) const LinearProgressIndicator(),
             Text(c.message),
+            if (kDebugMode && c.configuration.diagnostics)
+              ExpansionTile(
+                title: const Text('Diagnóstico OCR'),
+                children: [
+                  if (c.diagnosticCapture?.original != null) ...[
+                    const Text('Original corrigida, sem timestamp'),
+                    Image.memory(c.diagnosticCapture!.original!, height: 150),
+                    const Text('ROI sem timestamp'),
+                    Image.memory(c.diagnosticCapture!.ocrInput, height: 120),
+                  ],
+                  for (final attempt in c.ocr.attempts) ...[
+                    Text(attempt.toJson().toString()),
+                    Image.memory(attempt.image, height: 100),
+                  ],
+                  SelectableText(
+                    'Texto: ${c.ocr.rawText}\nConfiança: ${c.ocr.confidence}\n'
+                    'Peso: ${c.ocr.weight}\nFalha: ${c.ocr.error ?? c.failureReason}',
+                  ),
+                ],
+              ),
             if (c.stage == CaptureStage.ocrSuccess) ...[
               Text(
                 'Peso identificado: ${formatWeight(c.ocr.weight!)} kg',
@@ -202,7 +223,9 @@ class _CameraEvidencePreviewState extends State<CameraEvidencePreview> {
 
   @override
   Widget build(BuildContext context) => AspectRatio(
-    aspectRatio: 16 / 9,
+    aspectRatio: widget.active && widget.camera is WeighingCameraGeometry
+        ? (widget.camera as WeighingCameraGeometry).previewAspectRatio
+        : 16 / 9,
     child: ColoredBox(
       color: Colors.black,
       child: Stack(
@@ -282,7 +305,9 @@ class CameraDiagnosticDialog extends StatefulWidget {
     super.key,
     required this.camera,
     required this.cameraId,
+    this.region = const DisplayRegion(),
   });
+  final DisplayRegion region;
   final WeighingCameraService camera;
   final String cameraId;
   @override
@@ -335,6 +360,7 @@ class _CameraDiagnosticDialogState extends State<CameraDiagnosticDialog> {
             camera: widget.camera,
             active: _active,
             status: _status,
+            region: widget.region,
           ),
           Text(_status),
         ],
