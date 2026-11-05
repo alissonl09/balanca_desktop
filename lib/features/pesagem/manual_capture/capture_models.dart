@@ -15,10 +15,12 @@ class WebcamConfiguration {
     this.minimumWeight = 0,
     this.maximumWeight = 100000,
     this.diagnostics = false,
+    this.requiredReadings = 3,
   });
   final DisplayRegion region;
   final double minimumWeight, maximumWeight;
   final bool diagnostics;
+  final int requiredReadings;
   WebcamConfiguration copyWith({
     bool? enabled,
     String? cameraId,
@@ -28,6 +30,7 @@ class WebcamConfiguration {
     double? minimumWeight,
     double? maximumWeight,
     bool? diagnostics,
+    int? requiredReadings,
   }) => WebcamConfiguration(
     enabled: enabled ?? this.enabled,
     cameraId: cameraId ?? this.cameraId,
@@ -37,6 +40,7 @@ class WebcamConfiguration {
     minimumWeight: minimumWeight ?? this.minimumWeight,
     maximumWeight: maximumWeight ?? this.maximumWeight,
     diagnostics: diagnostics ?? this.diagnostics,
+    requiredReadings: requiredReadings ?? this.requiredReadings,
   );
   final bool enabled;
   final bool mirrorHorizontally;
@@ -50,6 +54,7 @@ class WebcamConfiguration {
     'minimumWeight': minimumWeight,
     'maximumWeight': maximumWeight,
     'diagnostics': diagnostics,
+    'requiredReadings': requiredReadings,
   };
   factory WebcamConfiguration.fromJson(Map<String, dynamic> json) =>
       WebcamConfiguration(
@@ -63,6 +68,7 @@ class WebcamConfiguration {
         minimumWeight: (json['minimumWeight'] as num?)?.toDouble() ?? 0,
         maximumWeight: (json['maximumWeight'] as num?)?.toDouble() ?? 100000,
         diagnostics: json['diagnostics'] == true,
+        requiredReadings: (json['requiredReadings'] as int?)?.clamp(2, 5) ?? 3,
       );
 }
 
@@ -147,10 +153,43 @@ class WeightOcrResult {
     this.attempts = const [],
     this.strategy = '',
     this.engineMessage,
+    this.model = '',
+    this.psm = 7,
+    this.elapsedMs = 0,
+    this.consensusReadings = 0,
+    this.requiredReadings = 3,
   });
   final List<OcrAttempt> attempts;
   final String strategy;
   final String? engineMessage;
+  final String model;
+  final int psm, elapsedMs, consensusReadings, requiredReadings;
+  double get ocrConfidence => confidence;
+  bool get consensus => consensusReadings >= requiredReadings;
+  double get finalConfidence => success && consensus ? confidence : 0;
+  WeightOcrResult copyWith({
+    String? model,
+    int? psm,
+    int? elapsedMs,
+    int? consensusReadings,
+    int? requiredReadings,
+    String? failure,
+    List<OcrAttempt>? attempts,
+    String? strategy,
+  }) => WeightOcrResult(
+    rawText: rawText,
+    weight: weight,
+    confidence: confidence,
+    error: failure ?? error,
+    engineMessage: engineMessage,
+    model: model ?? this.model,
+    psm: psm ?? this.psm,
+    elapsedMs: elapsedMs ?? this.elapsedMs,
+    consensusReadings: consensusReadings ?? this.consensusReadings,
+    requiredReadings: requiredReadings ?? this.requiredReadings,
+    attempts: attempts ?? this.attempts,
+    strategy: strategy ?? this.strategy,
+  );
   final String rawText;
   final double? weight;
   final double confidence;
@@ -177,6 +216,9 @@ class OcrAttempt {
     'parsedWeight': result.weight,
     'failureReason': result.error,
     'engineMessage': result.engineMessage,
+    'model': result.model,
+    'psm': result.psm,
+    'elapsedMs': result.elapsedMs,
   };
 }
 
@@ -235,8 +277,13 @@ class ManualWeighingEvidence {
     'justification': justification,
     'region': region.toJson(),
     'ocrStableReadings': stableReadings,
-    'ocrRequiredReadings': 3,
+    'ocrRequiredReadings': ocr.requiredReadings,
     'ocrEngineMessage': ocr.engineMessage,
+    'ocrModel': ocr.model,
+    'ocrPsm': ocr.psm,
+    'ocrConfidence': ocr.ocrConfidence,
+    'ocrFinalConfidence': ocr.finalConfidence,
+    'ocrConsensus': ocr.consensus,
   };
 }
 

@@ -1,0 +1,8 @@
+Seven Segment Display OCR traineddata
+Source: https://github.com/Shreeshrii/tessdata_ssd
+Author/publisher: Shreeshrii
+Commit: e493a10a4bf81632506cf24ba99d83854afff9f6
+License: Apache License, Version 2.0 (see LICENSE.tessdata_ssd).
+7seg.traineddata, ssd.traineddata and ssd_int.traineddata are redistributed unmodified.
+Upstream does not include a separate NOTICE file at this revision.
+Integration and preprocessing code are maintained by balanca_desktop.

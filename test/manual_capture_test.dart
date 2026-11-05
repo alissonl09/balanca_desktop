@@ -112,6 +112,28 @@ void main() {
       expect(controller.imagePath, isNotNull);
     }
   });
+  test(
+    'hallucinated minus with zero confidence keeps OCR failure and evidence',
+    () async {
+      ocr.result = const WeightOcrResult(
+        rawText: '-570.0',
+        weight: -570,
+        confidence: 0,
+        error: 'OCR_BAIXA_CONFIANCA',
+      );
+      await controller.initialize();
+      await controller.capture();
+      expect(controller.failureReason, 'OCR_BAIXA_CONFIANCA');
+      expect(controller.manualAllowed, isTrue);
+      expect(controller.canConfirm, isFalse);
+      expect(controller.imagePath, isNotNull);
+      controller.setManualWeight('570');
+      final evidence = await controller.confirm();
+      expect(evidence!.source, WeightSource.manualFallback);
+      expect(evidence.failureReason, 'OCR_BAIXA_CONFIANCA');
+      expect(store.photos.containsKey(evidence.imagePath), isTrue);
+    },
+  );
   for (final result in [
     const WeightOcrResult(error: 'OCR_SEM_LEITURA'),
     const WeightOcrResult(

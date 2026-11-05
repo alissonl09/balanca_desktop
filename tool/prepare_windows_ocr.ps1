@@ -40,6 +40,22 @@ if (!(Test-Path -LiteralPath $modelPath)) {
 if ((Get-FileHash -LiteralPath $modelPath -Algorithm SHA256).Hash -ne '8280AED0782FE27257A68EA10FE7EF324CA0F8D85BD2FD145D1C2B560BCB66BA') {
   throw 'Hash do modelo OCR inválido.'
 }
+# Specialized models are source assets, never fetched on an operator station.
+$ssdSource = Join-Path $repoRoot 'assets\ocr'
+$ssdManifest = Get-Content -LiteralPath (Join-Path $ssdSource 'SOURCE.json') -Raw | ConvertFrom-Json
+foreach ($modelName in @('7seg.traineddata', 'ssd.traineddata', 'ssd_int.traineddata')) {
+  $sourceModel = Join-Path $ssdSource "tessdata\$modelName"
+  $expectedModelHash = $ssdManifest.files.$modelName.sha256
+  if ((Get-FileHash -LiteralPath $sourceModel -Algorithm SHA256).Hash -ne $expectedModelHash) {
+    throw "Modelo especializado ausente ou corrompido: $modelName"
+  }
+  Copy-Item -LiteralPath $sourceModel -Destination (Join-Path (Split-Path $modelPath) $modelName)
+}
+$ssdNotices = Join-Path $runtimeRoot 'licenses\tessdata_ssd'
+New-Item -ItemType Directory -Force -Path $ssdNotices | Out-Null
+foreach ($noticeName in @('LICENSE.tessdata_ssd', 'SOURCE.json', 'UPSTREAM-README.md', 'NOTICE.txt')) {
+  Copy-Item -LiteralPath (Join-Path $ssdSource $noticeName) -Destination $ssdNotices
+}
 & (Join-Path $runtimeRoot 'tesseract.exe') --version
 if ($LASTEXITCODE -ne 0) { throw 'Engine extraída não executa nesta máquina.' }
 & (Join-Path $runtimeRoot 'tesseract.exe') --tessdata-dir (Join-Path $runtimeRoot 'tessdata') --list-langs

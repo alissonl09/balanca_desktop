@@ -80,6 +80,10 @@ class _ManualWebcamSettingsState extends State<ManualWebcamSettings> {
         camera: camera,
         cameraId: _config.cameraId!,
         region: _config.region,
+        ocr: widget.services.ocr,
+        processor: widget.services.processor,
+        configuration: _config,
+        diagnosticsStore: widget.services.diagnosticsStore,
       ),
     );
   }
@@ -232,6 +236,24 @@ class _ManualWebcamSettingsState extends State<ManualWebcamSettings> {
                 ),
               const Text(
                 'Pressione Enter em cada campo para salvar nesta estação.',
+              ),
+              DropdownButtonFormField<int>(
+                key: ValueKey('ocr-consensus-${_config.requiredReadings}'),
+                initialValue: _config.requiredReadings,
+                decoration: const InputDecoration(
+                  labelText: 'Leituras consecutivas para confirmar OCR',
+                ),
+                items: [
+                  for (final n in [2, 3, 4, 5])
+                    DropdownMenuItem(value: n, child: Text('$n leituras')),
+                ],
+                onChanged: _saving
+                    ? null
+                    : (n) {
+                        if (n != null) {
+                          _save(_config.copyWith(requiredReadings: n));
+                        }
+                      },
               ),
               if (kDebugMode)
                 SwitchListTile(

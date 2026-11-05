@@ -12,8 +12,20 @@ abstract interface class WeightOcrService {
   Future<WeightOcrResult> recognize(Uint8List image);
 }
 
+abstract interface class OcrVariantEngine {
+  Future<WeightOcrResult> recognizeVariant(
+    Uint8List image, {
+    String model = 'eng',
+    String? tessdataDirectory,
+    int psm = 7,
+    bool restrict = false,
+    bool numericOnly = false,
+    String whitelist = '0123456789.-',
+  });
+}
+
 /// Real offline adapter. Requires Tesseract 5 + eng.traineddata on the station.
-class TesseractWeightOcrService implements WeightOcrService {
+class TesseractWeightOcrService implements WeightOcrService, OcrVariantEngine {
   TesseractWeightOcrService({String? executable, TesseractRuntime? runtime})
     : runtime = runtime ?? TesseractRuntime.resolve(executable: executable);
   final TesseractRuntime runtime;
@@ -26,10 +38,10 @@ class TesseractWeightOcrService implements WeightOcrService {
       variants = await Isolate.run(() => prepareOcrVariants(image));
     } catch (_) {
       // Still report a missing engine explicitly, including for invalid input.
-      return _recognizeVariant(image);
+      return recognizeVariant(image);
     }
     for (final variant in variants.entries) {
-      final result = await _recognizeVariant(
+      final result = await recognizeVariant(
         variant.value,
         // Tesseract can assign confidence 0 to mixed number/unit words when
         // constrained by a whitelist, even if it reads them correctly.
@@ -48,19 +60,51 @@ class TesseractWeightOcrService implements WeightOcrService {
     return selectConsistentOcr(attempts);
   }
 
-  Future<WeightOcrResult> _recognizeVariant(
+  @override
+  Future<WeightOcrResult> recognizeVariant(
+    Uint8List image, {
+    String model = 'eng',
+    String? tessdataDirectory,
+    int psm = 7,
+    bool restrict = false,
+    bool numericOnly = false,
+    String whitelist = '0123456789.-',
+  }) async {
+    final clock = Stopwatch()..start();
+    final result = await _runVariant(
+      image,
+      model: model,
+      tessdataDirectory: tessdataDirectory,
+      psm: psm,
+      restrict: restrict,
+      numericOnly: numericOnly,
+      whitelist: whitelist,
+    );
+    return result.copyWith(
+      model: model,
+      psm: psm,
+      elapsedMs: clock.elapsedMilliseconds,
+    );
+  }
+
+  Future<WeightOcrResult> _runVariant(
     Uint8List image, {
     bool restrict = false,
+    String model = 'eng',
+    String? tessdataDirectory,
+    int psm = 7,
+    bool numericOnly = false,
+    String whitelist = '0123456789.-',
   }) async {
     Directory? temporary;
     Process? process;
     try {
-      final tessdata = runtime.tessdataDirectory;
+      final tessdata = tessdataDirectory ?? runtime.tessdataDirectory;
       if (tessdata != null &&
-          !await File('$tessdata/eng.traineddata').exists()) {
+          !await File('$tessdata/$model.traineddata').exists()) {
         return WeightOcrResult(
           error: 'OCR_MODELO_INDISPONIVEL',
-          engineMessage: '$tessdata/eng.traineddata',
+          engineMessage: '$tessdata/$model.traineddata',
         );
       }
       temporary = await Directory.systemTemp.createTemp('balanca_ocr_');
@@ -70,11 +114,16 @@ class TesseractWeightOcrService implements WeightOcrService {
         input.path,
         'stdout',
         '-l',
-        'eng',
+        model,
         if (tessdata != null) ...['--tessdata-dir', tessdata],
         '--psm',
-        '7',
-        if (restrict) ...['-c', 'tessedit_char_whitelist=0123456789.,-kgKG'],
+        '$psm',
+        '--oem',
+        '1',
+        if (numericOnly || restrict) ...[
+          '-c',
+          'tessedit_char_whitelist=${numericOnly ? whitelist : '0123456789.,-kgKG'}',
+        ],
         '-c',
         'load_system_dawg=0',
         '-c',
@@ -95,7 +144,7 @@ class TesseractWeightOcrService implements WeightOcrService {
               : stderr,
         );
       }
-      return interpretTesseractTsv(text);
+      return interpretTesseractTsv(text, numericOnly: numericOnly);
     } on ProcessException catch (error) {
       return WeightOcrResult(
         error: 'OCR_ENGINE_INDISPONIVEL',
@@ -122,18 +171,25 @@ class TesseractWeightOcrService implements WeightOcrService {
 
 /// Strict display grammar. A dot/comma is ALWAYS decimal, never thousands.
 /// No letter substitutions: missing or uncertain digits must remain a failure.
-WeightOcrResult interpretTesseractTsv(String tsv) {
+WeightOcrResult interpretTesseractTsv(String tsv, {bool numericOnly = false}) {
   final words = <String>[];
   final confidences = <double>[];
+  final lines = <String>{};
   for (final line in const LineSplitter().convert(tsv).skip(1)) {
     final cells = line.split('\t');
     if (cells.length < 12 || cells[0] != '5' || cells[11].trim().isEmpty) {
       continue;
     }
     words.add(cells[11].trim());
+    lines.add('${cells[2]}:${cells[3]}:${cells[4]}');
     confidences.add((double.tryParse(cells[10]) ?? 0) / 100);
   }
   final raw = words.join(' ');
+  if (numericOnly &&
+      (lines.length != 1 ||
+          !RegExp(r'^-?[0-9]{1,7}(?:[.,][0-9]{1,3})?$').hasMatch(raw))) {
+    return WeightOcrResult(rawText: raw, error: 'OCR_FORMATO_INVALIDO');
+  }
   return parseWeightText(
     raw,
     confidences.isEmpty ? 0 : confidences.reduce((a, b) => a < b ? a : b),
@@ -183,5 +239,8 @@ WeightOcrResult selectConsistentOcr(List<OcrAttempt> attempts) {
     strategy: best.strategy,
     attempts: attempts,
     engineMessage: best.result.engineMessage,
+    model: best.result.model,
+    psm: best.result.psm,
+    elapsedMs: attempts.fold(0, (sum, a) => sum + a.result.elapsedMs),
   );
 }

@@ -6,13 +6,18 @@ BALANCA DESKTOP - PACOTE COM OCR LOCAL
 4. Nao precisa instalar Tesseract ou alterar PATH.
 5. Na Pesagem Manual, enquadre somente os digitos principais no retangulo
    amarelo, incluindo o ponto/virgula. Evite tara, capacidade e icones.
-6. Mantenha o peso estavel durante as tres capturas e confira o peso proposto.
+6. Mantenha o peso estavel durante as capturas consecutivas configuradas
+   (padrao: tres). Confira o peso proposto antes de confirmar.
+7. Em Testar camera, Testar leitura analisa um quadro sem registrar pesagem.
+   Ajuste a ROI para incluir somente os digitos, sinal e separador decimal.
 
 Se falhar, a foto continua salva e o peso manual permanece disponivel.
 Anote o codigo OCR_ exibido pela nova versao. Envie o codigo e a foto salva
 para diagnostico. A mensagem da versao anterior era generica e nao indicava
 se faltava engine, modelo, confianca ou enquadramento.
 
-Engine: Tesseract 5.5.3. Modelo: tessdata_best 4.1.0 / eng.
-Engine, modelo e DLLs estao na pasta ocr/. Licenca upstream em ocr/doc/LICENSE.
+Engine: Tesseract 5.x. Modelo inicial: 7seg / Shreeshrii/tessdata_ssd.
+Fallback generico: tessdata_best 4.1.0 / eng. ssd e ssd_int sao para comparacao.
+Engine, modelos e DLLs estao na pasta ocr/. Licenca da engine em ocr/doc/LICENSE.
+Origem, hashes e licenca Apache-2.0 dos modelos em ocr/licenses/tessdata_ssd/.
 Testes sinteticos nao substituem a validacao no indicador fisico IND560/570.

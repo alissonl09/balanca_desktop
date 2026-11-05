@@ -6,6 +6,21 @@ class TesseractRuntime {
   final String executable;
   final String? tessdataDirectory;
 
+  /// Real files copied by Windows CMake; no runtime network or model download.
+  static String resolveModelDirectory({
+    String? applicationDirectory,
+    String? workingDirectory,
+  }) {
+    final app =
+        applicationDirectory ?? File(Platform.resolvedExecutable).parent.path;
+    final cwd = workingDirectory ?? Directory.current.path;
+    final bundled = '$app/ocr/tessdata';
+    final development = '$cwd/assets/ocr/tessdata';
+    if (Directory(bundled).existsSync()) return bundled;
+    if (Directory(development).existsSync()) return development;
+    return bundled;
+  }
+
   static TesseractRuntime resolve({
     String? executable,
     String? applicationDirectory,
@@ -56,6 +71,9 @@ class TesseractRuntime {
 }
 
 String ocrFailureMessage(String? code) => switch (code) {
+  'OCR_MODELO_ESPECIALIZADO_INDISPONIVEL' => 'O modelo de sete segmentos está ausente. Restaure a pasta ocr/tessdata do pacote completo.',
+  'OCR_MODELOS_DIVERGENTES' =>
+    'Os modelos OCR discordaram. Ajuste o enquadramento e tente novamente.',
   'OCR_ENGINE_INDISPONIVEL' => 'O motor OCR não foi encontrado. Reinstale a pasta completa do aplicativo, incluindo a pasta ocr.',
   'OCR_MODELO_INDISPONIVEL' => 'O modelo OCR está ausente. Verifique o arquivo ocr/tessdata/eng.traineddata.',
   'OCR_ENGINE_ERRO' => 'O motor OCR não conseguiu executar. Verifique a engine, suas DLLs e o modelo inglês.',

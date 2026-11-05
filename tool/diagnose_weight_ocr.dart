@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:balanca_desktop/features/pesagem/manual_capture/capture_models.dart';
 import 'package:balanca_desktop/features/pesagem/manual_capture/image_processor.dart';
 import 'package:balanca_desktop/features/pesagem/manual_capture/weight_ocr_service.dart';
+import 'package:balanca_desktop/features/pesagem/manual_capture/seven_segment_ocr_service.dart';
 
 /// Offline replay. Input is never overwritten. Optional ROI: x y width height.
 Future<void> main(List<String> args) async {
@@ -15,7 +16,7 @@ Future<void> main(List<String> args) async {
     return;
   }
   final region = args.length == 1
-      ? const DisplayRegion(left: 0, top: 0, width: 1, height: 1)
+      ? const DisplayRegion()
       : DisplayRegion(
           left: double.parse(args[1]),
           top: double.parse(args[2]),
@@ -27,7 +28,8 @@ Future<void> main(List<String> args) async {
     region,
   );
   final engine = TesseractWeightOcrService();
-  final result = await engine.recognize(capture.ocrInput);
+  final cascade = SevenSegmentWeightOcrService(engine: engine, generic: engine);
+  final result = await cascade.recognize(capture.ocrInput);
   stdout.writeln(
     const JsonEncoder.withIndent('  ').convert({
       'engine': engine.executable,
@@ -37,6 +39,10 @@ Future<void> main(List<String> args) async {
       'confidence': result.confidence,
       'error': result.error,
       'engineMessage': result.engineMessage,
+      'model': result.model,
+      'psm': result.psm,
+      'pipeline': result.strategy,
+      'elapsedMs': result.elapsedMs,
       'attempts': result.attempts.map((a) => a.toJson()).toList(),
     }),
   );

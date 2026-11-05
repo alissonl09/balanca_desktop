@@ -10,6 +10,10 @@ import 'camera_service.dart';
 import 'capture_controller.dart';
 import 'capture_models.dart';
 import 'manual_capture_services.dart';
+import 'weight_ocr_service.dart';
+import 'image_processor.dart';
+import 'ocr_diagnostics_store.dart';
+import 'weight_recognition_validation.dart';
 
 Future<ManualWeighingEvidence?> showManualCapture(
   BuildContext context, {
@@ -80,6 +84,16 @@ class _ManualCaptureDialogState extends State<ManualCaptureDialog> {
             const SizedBox(height: 12),
             if (c.busy) const LinearProgressIndicator(),
             Text(c.message),
+            if (c.manualAllowed && c.ocr.weight != null)
+              Text(
+                'Leitura OCR descartada: ${formatWeight(c.ocr.weight!)} kg • '
+                'Confiança: ${(c.ocr.confidence * 100).toStringAsFixed(1)}%',
+              ),
+            if (c.manualAllowed && c.failureReason == 'OCR_FORA_DA_FAIXA')
+              Text(
+                'Faixa OCR configurada: ${formatWeight(c.configuration.minimumWeight)} '
+                'a ${formatWeight(c.configuration.maximumWeight)} kg.',
+              ),
             if (kDebugMode && c.configuration.diagnostics)
               ExpansionTile(
                 title: const Text('Diagnóstico OCR'),
@@ -110,6 +124,10 @@ class _ManualCaptureDialogState extends State<ManualCaptureDialog> {
               ),
               Text(
                 'Confiança: ${(c.ocr.confidence * 100).toStringAsFixed(1)}%',
+              ),
+              Text(
+                'Modelo: ${c.ocr.model.isEmpty ? 'OCR' : c.ocr.model} • '
+                '${c.stableReadings}/${c.configuration.requiredReadings} leituras estáveis',
               ),
             ],
             if (c.imagePath != null)
@@ -306,10 +324,18 @@ class CameraDiagnosticDialog extends StatefulWidget {
     required this.camera,
     required this.cameraId,
     this.region = const DisplayRegion(),
+    this.ocr,
+    this.processor,
+    this.configuration = const WebcamConfiguration(),
+    this.diagnosticsStore,
   });
   final DisplayRegion region;
   final WeighingCameraService camera;
   final String cameraId;
+  final WeightOcrService? ocr;
+  final CaptureImageProcessor? processor;
+  final WebcamConfiguration configuration;
+  final OcrDiagnosticsStore? diagnosticsStore;
   @override
   State<CameraDiagnosticDialog> createState() => _CameraDiagnosticDialogState();
 }
@@ -317,6 +343,9 @@ class CameraDiagnosticDialog extends StatefulWidget {
 class _CameraDiagnosticDialogState extends State<CameraDiagnosticDialog> {
   bool _active = false;
   String _status = 'Inicializando câmera';
+  bool _analyzing = false;
+  WeightOcrResult? _result;
+  String? _diagnosticPath;
   @override
   void initState() {
     super.initState();
@@ -338,6 +367,47 @@ class _CameraDiagnosticDialogState extends State<CameraDiagnosticDialog> {
           () => _status = 'Erro ao abrir câmera. Verifique conexão, permissão e uso por outro programa.',
         );
       }
+    }
+  }
+
+  Future<void> _testReading() async {
+    if (_analyzing || widget.ocr == null || widget.processor == null) return;
+    setState(() {
+      _analyzing = true;
+      _result = null;
+      _diagnosticPath = null;
+    });
+    try {
+      final photo = await widget.camera.capture();
+      if (!mounted) return;
+      final capture = await widget.processor!.process(photo, widget.region);
+      if (!mounted) return;
+      var result = await widget.ocr!.recognize(capture.ocrInput);
+      result = WeightRecognitionRules(
+        minimum: widget.configuration.minimumWeight,
+        maximum: widget.configuration.maximumWeight,
+      ).validate(result);
+      if (!mounted) return;
+      if (kDebugMode && widget.configuration.diagnostics) {
+        try {
+          _diagnosticPath = await widget.diagnosticsStore?.save(
+            capture,
+            result,
+            widget.region,
+          );
+        } catch (_) {
+          _diagnosticPath = 'Não foi possível salvar o diagnóstico opcional.';
+        }
+      }
+      if (mounted) setState(() => _result = result);
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _result = const WeightOcrResult(error: 'ERRO_TESTE_OCR'),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _analyzing = false);
     }
   }
 
@@ -363,10 +433,29 @@ class _CameraDiagnosticDialogState extends State<CameraDiagnosticDialog> {
             region: widget.region,
           ),
           Text(_status),
+          if (_analyzing) ...[
+            const LinearProgressIndicator(),
+            const Text('Analisando visor...'),
+          ],
+          if (_result != null)
+            SelectableText(
+              'Texto OCR: ${_result!.rawText}\nPeso candidato: ${_result!.weight ?? '-'} kg\n'
+              'Confiança OCR: ${(_result!.confidence * 100).toStringAsFixed(1)}%\n'
+              'Modelo: ${_result!.model}\nPSM: ${_result!.psm}\nPipeline: ${_result!.strategy}\n'
+              'Tempo: ${_result!.elapsedMs} ms\nFalha: ${_result!.error ?? '-'}\n'
+              'Diagnóstico de um quadro, sem confirmação temporal e sem registrar pesagem.',
+            ),
+          if (_diagnosticPath != null)
+            SelectableText('Diagnóstico local: $_diagnosticPath'),
         ],
       ),
     ),
     actions: [
+      if (widget.ocr != null)
+        OutlinedButton(
+          onPressed: _active && !_analyzing ? _testReading : null,
+          child: const Text('Testar leitura'),
+        ),
       TextButton(
         onPressed: () async {
           await widget.camera.stop();

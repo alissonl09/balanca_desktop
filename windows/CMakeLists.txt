@@ -83,6 +83,25 @@ else()
   message(WARNING "OCR runtime missing. Run tool/prepare_windows_ocr.ps1 before distributing this build.")
 endif()
 
+set(SSD_ASSET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../assets/ocr")
+set(SSD_HASH_7seg "7e170293e5ac660295d7d3f53346453447bd9c9845f9f384cc1005c791487291")
+set(SSD_HASH_ssd "f0060f4d2acb107f7c48c418f60887eddb37656fbbc2c21677df06ecbdf44ca5")
+set(SSD_HASH_ssd_int "557759383e030694420ee9f6a88e824abae4acf17f7b94415ca07e1152339339")
+foreach(model 7seg ssd ssd_int)
+  if(NOT EXISTS "${SSD_ASSET_DIR}/tessdata/${model}.traineddata")
+    message(FATAL_ERROR "Missing offline OCR model: ${model}.traineddata")
+  endif()
+  file(SHA256 "${SSD_ASSET_DIR}/tessdata/${model}.traineddata" model_hash)
+  if(NOT model_hash STREQUAL "${SSD_HASH_${model}}")
+    message(FATAL_ERROR "Offline OCR model checksum mismatch: ${model}.traineddata")
+  endif()
+endforeach()
+install(DIRECTORY "${SSD_ASSET_DIR}/tessdata/"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/ocr/tessdata" COMPONENT Runtime)
+install(FILES "${SSD_ASSET_DIR}/LICENSE.tessdata_ssd" "${SSD_ASSET_DIR}/SOURCE.json"
+  "${SSD_ASSET_DIR}/UPSTREAM-README.md" "${SSD_ASSET_DIR}/NOTICE.txt"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/ocr/licenses/tessdata_ssd" COMPONENT Runtime)
+
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 

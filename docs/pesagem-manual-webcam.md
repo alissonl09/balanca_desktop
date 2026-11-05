@@ -1,5 +1,10 @@
 # Pesagem Manual assistida por webcam (Windows)
 
+> Atualização de 05/11/2026: a cascata especializada, modelos offline,
+> pré-processamentos, comparação e diagnóstico atuais estão descritos em
+> [OCR de sete segmentos](ocr-sete-segmentos.md). As seções anteriores abaixo
+> preservam o histórico das etapas de implementação.
+
 ## Fluxos e escopo
 
 Serial/TCP continua com as regras atuais do indicador. A webcam só participa da ação

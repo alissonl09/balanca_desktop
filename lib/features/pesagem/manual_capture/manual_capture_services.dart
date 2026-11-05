@@ -3,6 +3,8 @@ import 'capture_models.dart';
 import 'evidence_store.dart';
 import 'image_processor.dart';
 import 'weight_ocr_service.dart';
+import 'seven_segment_ocr_service.dart';
+import 'ocr_diagnostics_store.dart';
 
 /// Application composition root; tests replace dependencies explicitly.
 class ManualCaptureServices {
@@ -12,6 +14,7 @@ class ManualCaptureServices {
     required this.evidenceStore,
     required this.configurationStore,
     CaptureImageProcessor? processor,
+    this.diagnosticsStore,
   }) : processor = processor ?? LocalCaptureImageProcessor();
   factory ManualCaptureServices.local() {
     final store = LocalManualWeighingStore();
@@ -20,9 +23,10 @@ class ManualCaptureServices {
       cameraFactory: () => DesktopWeighingCameraService(
         mirrorHorizontally: services.configuration.mirrorHorizontally,
       ),
-      ocr: TesseractWeightOcrService(),
+      ocr: SevenSegmentWeightOcrService(),
       evidenceStore: store,
       configurationStore: store,
+      diagnosticsStore: LocalOcrDiagnosticsStore(),
     );
     return services;
   }
@@ -32,6 +36,7 @@ class ManualCaptureServices {
   final ManualWeighingEvidenceStore evidenceStore;
   final WebcamConfigurationStore configurationStore;
   final CaptureImageProcessor processor;
+  final OcrDiagnosticsStore? diagnosticsStore;
   WebcamConfiguration configuration = const WebcamConfiguration();
   String? configurationError;
   Future<void> loadConfiguration() async {
@@ -47,6 +52,8 @@ class ManualCaptureServices {
         !value.minimumWeight.isFinite ||
         !value.maximumWeight.isFinite ||
         value.minimumWeight < 0 ||
+        value.requiredReadings < 2 ||
+        value.requiredReadings > 5 ||
         value.minimumWeight > value.maximumWeight) {
       throw ArgumentError('ROI ou faixa de peso inválida');
     }

@@ -8,6 +8,7 @@ import 'capture_models.dart';
 import 'manual_capture_services.dart';
 import 'image_processor.dart';
 import 'tesseract_runtime.dart';
+import 'weight_recognition_validation.dart';
 
 class ManualCaptureController extends ChangeNotifier {
   ManualCaptureController({
@@ -115,8 +116,14 @@ class ManualCaptureController extends ChangeNotifier {
     stableReadings = 0;
     diagnosticCapture = null;
     try {
-      double? previousWeight;
-      for (var frame = 0; frame < 3; frame++) {
+      final consensus = WeightTemporalConsensus(
+        requiredReadings: configuration.requiredReadings,
+      );
+      final rules = WeightRecognitionRules(
+        minimum: configuration.minimumWeight,
+        maximum: configuration.maximumWeight,
+      );
+      for (var frame = 0; frame < configuration.requiredReadings; frame++) {
         if (_closed) return;
         final photo = await camera.capture();
         if (_closed) return;
@@ -138,45 +145,27 @@ class ManualCaptureController extends ChangeNotifier {
         if (_closed) return;
         _update(
           CaptureStage.ocrProcessing,
-          'Analisando visor... ${frame + 1}/3',
+          'Analisando visor... ${frame + 1}/${configuration.requiredReadings}',
         );
         ocr = await services.ocr.recognize(processed.ocrInput);
         if (_closed) return;
-        if (ocr.success &&
-            (ocr.weight! < configuration.minimumWeight ||
-                ocr.weight! > configuration.maximumWeight ||
-                ocr.weight! < 0)) {
-          ocr = WeightOcrResult(
-            rawText: ocr.rawText,
-            weight: ocr.weight,
-            confidence: ocr.confidence,
-            error: 'OCR_FORA_DA_FAIXA',
-            strategy: ocr.strategy,
-            attempts: ocr.attempts,
-          );
-        } else if (ocr.success &&
-            previousWeight != null &&
-            previousWeight != ocr.weight) {
-          ocr = WeightOcrResult(
-            rawText: ocr.rawText,
-            weight: ocr.weight,
-            confidence: ocr.confidence,
-            error: 'OCR_LEITURA_INSTAVEL',
-            strategy: ocr.strategy,
-            attempts: ocr.attempts,
-          );
-        }
+        ocr = consensus.observe(rules.validate(ocr));
         if (kDebugMode && configuration.diagnostics) {
+          try {
+            await services.diagnosticsStore?.save(processed, ocr, region);
+          } catch (_) {
+            debugPrint('Não foi possível salvar o diagnóstico OCR opcional.');
+          }
           for (final attempt in ocr.attempts) {
             debugPrint('OCR ${attempt.toJson()}');
           }
           debugPrint(
             'OCR rawText: ${ocr.rawText}; confidence: ${ocr.confidence}; '
             'parsedWeight: ${ocr.weight}; preprocessingStrategy: ${ocr.strategy}; '
-            'failureReason: ${ocr.error}; frame: ${frame + 1}/3',
+            'failureReason: ${ocr.error}; frame: ${frame + 1}/${configuration.requiredReadings}',
           );
         }
-        stableReadings = ocr.success ? frame + 1 : 0;
+        stableReadings = consensus.stableReadings;
         failureReason = ocr.success
             ? null
             : ocr.error ??
@@ -187,8 +176,7 @@ class ManualCaptureController extends ChangeNotifier {
         await services.evidenceStore.save(_evidence(id: id, weight: null));
         if (_closed) return;
         if (ocr.success) {
-          previousWeight = ocr.weight;
-          if (frame == 2) {
+          if (ocr.consensus) {
             _update(CaptureStage.ocrSuccess, 'Leitura confirmada pela câmera');
           } else {
             await Future<void>.delayed(const Duration(milliseconds: 200));

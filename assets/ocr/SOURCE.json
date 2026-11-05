@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/Shreeshrii/tessdata_ssd",
+  "commit": "e493a10a4bf81632506cf24ba99d83854afff9f6",
+  "license": "Apache-2.0",
+  "files": {
+    "7seg.traineddata": {
+      "sha256": "7e170293e5ac660295d7d3f53346453447bd9c9845f9f384cc1005c791487291",
+      "bytes": 11435044,
+      "modified": false
+    },
+    "ssd.traineddata": {
+      "sha256": "f0060f4d2acb107f7c48c418f60887eddb37656fbbc2c21677df06ecbdf44ca5",
+      "bytes": 11314684,
+      "modified": false
+    },
+    "ssd_int.traineddata": {
+      "sha256": "557759383e030694420ee9f6a88e824abae4acf17f7b94415ca07e1152339339",
+      "bytes": 1442809,
+      "modified": false
+    }
+  }
+}
