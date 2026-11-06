@@ -63,7 +63,10 @@ class DesktopWeighingCameraService
       }
       final controller = CameraController(
         matches.first,
-        ResolutionPreset.high,
+        // camera_windows already chooses its best photo mode. Request the same
+        // maximum for preview, so both use the same native aspect ratio too.
+        // The decoded snapshot remains the resolution authority.
+        ResolutionPreset.max,
         enableAudio: false,
       );
       _controller = controller;

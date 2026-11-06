@@ -111,17 +111,20 @@ ManualCaptureServices mockCaptureServices({
   MockWeightOcrService? ocr,
   MockEvidenceStore? store,
   bool configured = false,
+  WeightOcrService? liveOcr,
 }) {
   final memory = store ?? MockEvidenceStore();
   final result = ManualCaptureServices(
     cameraFactory: cameraFactory ?? () => camera ?? MockWeighingCameraService(),
     ocr: ocr ?? MockWeightOcrService(),
+    liveOcr: liveOcr,
     evidenceStore: memory,
     configurationStore: memory,
     processor: MockCaptureImageProcessor(),
   );
   if (configured) {
     result.configuration = const WebcamConfiguration(
+      ocrEnabled: true,
       cameraId: 'usb-device-id',
       cameraName: 'USB Camera',
     );

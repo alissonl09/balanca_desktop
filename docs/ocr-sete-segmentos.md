@@ -1,5 +1,10 @@
 # OCR local para displays digitais — 05/11/2026
 
+> A rodada posterior de decimal, ROI e distância está documentada em
+> [Diagnóstico do ponto decimal](ocr-decimal-diagnostico.md). Ela atualiza
+> pré-processamento, detecção visual, calibração e consenso. O texto abaixo
+> preserva o histórico da incorporação dos modelos.
+
 ## Inspeção anterior à mudança
 
 O código já havia evoluído além da primeira implementação da webcam:

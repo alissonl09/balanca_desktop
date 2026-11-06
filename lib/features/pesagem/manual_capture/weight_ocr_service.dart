@@ -5,7 +5,9 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'capture_models.dart';
+import 'decimal_detector.dart';
 import 'image_processor.dart';
+import 'seven_segment_preprocessor.dart';
 import 'tesseract_runtime.dart';
 
 abstract interface class WeightOcrService {
@@ -26,9 +28,13 @@ abstract interface class OcrVariantEngine {
 
 /// Real offline adapter. Requires Tesseract 5 + eng.traineddata on the station.
 class TesseractWeightOcrService implements WeightOcrService, OcrVariantEngine {
-  TesseractWeightOcrService({String? executable, TesseractRuntime? runtime})
-    : runtime = runtime ?? TesseractRuntime.resolve(executable: executable);
+  TesseractWeightOcrService({
+    String? executable,
+    TesseractRuntime? runtime,
+    this.processTimeout = const Duration(seconds: 15),
+  }) : runtime = runtime ?? TesseractRuntime.resolve(executable: executable);
   final TesseractRuntime runtime;
+  final Duration processTimeout;
   String get executable => runtime.executable;
   @override
   Future<WeightOcrResult> recognize(Uint8List image) async {
@@ -40,6 +46,7 @@ class TesseractWeightOcrService implements WeightOcrService, OcrVariantEngine {
       // Still report a missing engine explicitly, including for invalid input.
       return recognizeVariant(image);
     }
+    final geometry = await Isolate.run(() => analyzeDisplayGeometry(image));
     for (final variant in variants.entries) {
       final result = await recognizeVariant(
         variant.value,
@@ -49,7 +56,13 @@ class TesseractWeightOcrService implements WeightOcrService, OcrVariantEngine {
             attempts.isNotEmpty &&
             !attempts.first.result.rawText.trim().toLowerCase().endsWith('kg'),
       );
-      attempts.add(OcrAttempt(variant.key, variant.value, result));
+      attempts.add(
+        OcrAttempt(
+          variant.key,
+          variant.value,
+          reconcileVisualDecimal(result, geometry),
+        ),
+      );
       if (result.error == 'OCR_ENGINE_INDISPONIVEL' ||
           result.error == 'OCR_ENGINE_ERRO' ||
           result.error == 'OCR_MODELO_INDISPONIVEL' ||
@@ -57,7 +70,52 @@ class TesseractWeightOcrService implements WeightOcrService, OcrVariantEngine {
         break;
       }
     }
-    return selectConsistentOcr(attempts);
+    final legacy = selectConsistentOcr(attempts);
+    if (legacy.success ||
+        attempts.any(
+          (a) => [
+            'OCR_ENGINE_INDISPONIVEL',
+            'OCR_ENGINE_ERRO',
+            'OCR_MODELO_INDISPONIVEL',
+            'OCR_TIMEOUT',
+          ].contains(a.result.error),
+        )) {
+      return legacy;
+    }
+    // Preserve the previous eng fallback, then compare eng on the untrimmed
+    // high-resolution display variants too. Its old line crop can cut a dot.
+    final displayVariants = await Isolate.run(
+      () => prepareSevenSegmentVariants(image),
+    );
+    final displayAttempts = <OcrAttempt>[];
+    for (final entry in displayVariants.entries) {
+      final raw = await recognizeVariant(entry.value, numericOnly: true);
+      final result = reconcileVisualDecimal(raw, geometry).copyWith(
+        diagnostics: {
+          ...geometry.toJson(),
+          'requestedScale': 2,
+          'effectiveScale': effectiveSevenSegmentScale(
+            geometry.width,
+            geometry.height,
+            2,
+          ),
+          'thresholdMethod': entry.key.split('_').first,
+          'paddingPixels': 10,
+          'morphology': entry.key.startsWith('close1')
+              ? 'close radius 1 (alternative)'
+              : 'none',
+        },
+      );
+      final attempt = OcrAttempt('display_${entry.key}', entry.value, result);
+      displayAttempts.add(attempt);
+      attempts.add(attempt);
+      final selected = selectConsistentOcr(displayAttempts);
+      if (selected.success) {
+        return selected.copyWith(attempts: List.unmodifiable(attempts));
+      }
+    }
+    return selectConsistentOcr(displayAttempts)
+        .copyWith(attempts: List.unmodifiable(attempts));
   }
 
   @override
@@ -133,7 +191,7 @@ class TesseractWeightOcrService implements WeightOcrService, OcrVariantEngine {
       ]);
       final output = process.stdout.transform(utf8.decoder).join();
       final errors = process.stderr.transform(utf8.decoder).join();
-      final code = await process.exitCode.timeout(const Duration(seconds: 15));
+      final code = await process.exitCode.timeout(processTimeout);
       final text = await output;
       final stderr = await errors;
       if (code != 0) {
@@ -210,6 +268,7 @@ WeightOcrResult parseWeightText(String raw, double confidence) {
   }
   return WeightOcrResult(
     rawText: raw,
+    normalizedText: match[1]!.replaceAll(' ', '').replaceAll(',', '.'),
     weight: double.tryParse(match[1]!.replaceAll(' ', '').replaceAll(',', '.')),
     confidence: confidence,
     error: confidence < WeightOcrResult.threshold
@@ -224,23 +283,22 @@ WeightOcrResult selectConsistentOcr(List<OcrAttempt> attempts) {
   if (attempts.isEmpty) return const WeightOcrResult(error: 'OCR_SEM_LEITURA');
   final parsed = attempts.where((a) => a.result.weight != null).toList();
   final valid = parsed.where((a) => a.result.success).toList();
-  final values = parsed.map((a) => a.result.weight).toSet();
+  final values = parsed.map((a) => a.result.recognitionKey).toSet();
   final best = valid.isNotEmpty ? valid.first : attempts.last;
   final error = values.length > 1
       ? 'OCR_VARIANTES_DIVERGENTES'
       : valid.length < 2 || !attempts.first.result.success
       ? best.result.error ?? 'OCR_SEM_CONSENSO'
       : null;
-  return WeightOcrResult(
-    rawText: best.result.rawText,
-    weight: best.result.weight,
-    confidence: best.result.confidence,
-    error: error,
+  return best.result.copyWith(
+    failure: error,
+    confidence: valid.isEmpty
+        ? best.result.confidence
+        : valid.map((a) => a.result.confidence).reduce((a, b) => a < b ? a : b),
     strategy: best.strategy,
     attempts: attempts,
-    engineMessage: best.result.engineMessage,
     model: best.result.model,
     psm: best.result.psm,
-    elapsedMs: attempts.fold(0, (sum, a) => sum + a.result.elapsedMs),
+    elapsedMs: attempts.fold<int>(0, (sum, a) => sum + a.result.elapsedMs),
   );
 }

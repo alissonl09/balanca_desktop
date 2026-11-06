@@ -8,8 +8,13 @@ import '../pesagem/manual_capture/manual_capture_services.dart';
 import 'settings_widgets.dart';
 
 class ManualWebcamSettings extends StatefulWidget {
-  const ManualWebcamSettings({super.key, required this.services});
+  const ManualWebcamSettings({
+    super.key,
+    required this.services,
+    this.manualWeighingEnabled = true,
+  });
   final ManualCaptureServices services;
+  final bool manualWeighingEnabled;
   @override
   State<ManualWebcamSettings> createState() => _ManualWebcamSettingsState();
 }
@@ -74,18 +79,23 @@ class _ManualWebcamSettingsState extends State<ManualWebcamSettings> {
 
   Future<void> _testCamera() async {
     final camera = widget.services.cameraFactory();
-    await showDialog<void>(
+    final region = await showDialog<DisplayRegion>(
       context: context,
       builder: (_) => CameraDiagnosticDialog(
         camera: camera,
         cameraId: _config.cameraId!,
         region: _config.region,
-        ocr: widget.services.ocr,
+        ocr: _config.ocrEnabled
+            ? widget.services.liveOcr ?? widget.services.ocr
+            : null,
         processor: widget.services.processor,
         configuration: _config,
         diagnosticsStore: widget.services.diagnosticsStore,
       ),
     );
+    if (region != null && mounted) {
+      await _save(_config.copyWith(region: region));
+    }
   }
 
   @override
@@ -97,6 +107,36 @@ class _ManualWebcamSettingsState extends State<ManualWebcamSettings> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (widget.manualWeighingEnabled) ...[
+            DropdownButtonFormField<bool>(
+              key: ValueKey('manual-weight-ocr-${_config.ocrEnabled}'),
+              initialValue: _config.ocrEnabled,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Leitura do peso na pesagem manual',
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: true,
+                  child: Text('Ler a imagem por OCR'),
+                ),
+                DropdownMenuItem(
+                  value: false,
+                  child: Text('Não ler a imagem: foto e digitação do peso'),
+                ),
+              ],
+              onChanged: _saving
+                  ? null
+                  : (value) {
+                      if (value != null) {
+                        _save(_config.copyWith(ocrEnabled: value));
+                      }
+                    },
+            ),
+            const Text(
+              'Salvo nesta estação. Sem OCR, a foto é registrada e o campo de peso é liberado imediatamente.',
+            ),
+          ],
           SwitchListTile(
             title: const Text('Webcam habilitada'),
             value: _config.enabled,
@@ -163,111 +203,149 @@ class _ManualWebcamSettingsState extends State<ManualWebcamSettings> {
                     ),
                   ),
           ),
-          ExpansionTile(
-            title: const Text('Ajustar ROI e validação OCR'),
-            children: [
-              const Text(
-                'ROI: enquadre somente o peso principal, sem tara, capacidade ou ícones.',
-              ),
-              for (final field in ['X', 'Y', 'Largura', 'Altura'])
-                TextFormField(
-                  key: ValueKey('roi-$field-${_config.region.toJson()}'),
-                  initialValue: switch (field) {
-                    'X' => _config.region.left.toString(),
-                    'Y' => _config.region.top.toString(),
-                    'Largura' => _config.region.width.toString(),
-                    _ => _config.region.height.toString(),
-                  },
-                  decoration: InputDecoration(labelText: 'ROI $field (0 a 1)'),
-                  onFieldSubmitted: _saving
-                      ? null
-                      : (text) {
-                          final v = double.tryParse(text.replaceAll(',', '.'));
-                          if (v == null) return;
-                          final r = _config.region;
-                          final next = DisplayRegion(
-                            left: field == 'X' ? v : r.left,
-                            top: field == 'Y' ? v : r.top,
-                            width: field == 'Largura' ? v : r.width,
-                            height: field == 'Altura' ? v : r.height,
-                          );
-                          if (next.valid) {
-                            _save(_config.copyWith(region: next));
-                          } else {
-                            setState(
-                              () => _error = 'ROI deve ficar dentro da imagem. Reduza largura/altura antes de mover.',
+          if (_config.ocrEnabled)
+            ExpansionTile(
+              title: const Text('Ajustar ROI e validação OCR'),
+              children: [
+                const Text(
+                  'ROI: enquadre somente o peso principal, sem tara, capacidade ou ícones.',
+                ),
+                for (final field in ['X', 'Y', 'Largura', 'Altura'])
+                  TextFormField(
+                    key: ValueKey('roi-$field-${_config.region.toJson()}'),
+                    initialValue: switch (field) {
+                      'X' => _config.region.left.toString(),
+                      'Y' => _config.region.top.toString(),
+                      'Largura' => _config.region.width.toString(),
+                      _ => _config.region.height.toString(),
+                    },
+                    decoration: InputDecoration(
+                      labelText: 'ROI $field (0 a 1)',
+                    ),
+                    onFieldSubmitted: _saving
+                        ? null
+                        : (text) {
+                            final v = double.tryParse(
+                              text.replaceAll(',', '.'),
                             );
-                          }
-                        },
-                ),
-              for (final minimum in [true, false])
-                TextFormField(
-                  key: ValueKey(
-                    'range-$minimum-${_config.minimumWeight}-${_config.maximumWeight}',
+                            if (v == null) return;
+                            final r = _config.region;
+                            final next = DisplayRegion(
+                              deskewDegrees: r.deskewDegrees,
+                              left: field == 'X' ? v : r.left,
+                              top: field == 'Y' ? v : r.top,
+                              width: field == 'Largura' ? v : r.width,
+                              height: field == 'Altura' ? v : r.height,
+                            );
+                            if (next.valid) {
+                              _save(_config.copyWith(region: next));
+                            } else {
+                              setState(
+                                () => _error = 'ROI deve ficar dentro da imagem. Reduza largura/altura antes de mover.',
+                              );
+                            }
+                          },
                   ),
-                  initialValue:
-                      (minimum ? _config.minimumWeight : _config.maximumWeight)
-                          .toString(),
-                  decoration: InputDecoration(
-                    labelText: minimum
-                        ? 'Peso mínimo OCR (kg)'
-                        : 'Peso máximo OCR (kg)',
+                for (final minimum in [true, false])
+                  TextFormField(
+                    key: ValueKey(
+                      'range-$minimum-${_config.minimumWeight}-${_config.maximumWeight}',
+                    ),
+                    initialValue:
+                        (minimum
+                                ? _config.minimumWeight
+                                : _config.maximumWeight)
+                            .toString(),
+                    decoration: InputDecoration(
+                      labelText: minimum
+                          ? 'Peso mínimo OCR (kg)'
+                          : 'Peso máximo OCR (kg)',
+                    ),
+                    onFieldSubmitted: _saving
+                        ? null
+                        : (text) {
+                            final v = double.tryParse(
+                              text.replaceAll(',', '.'),
+                            );
+                            if (v == null ||
+                                !v.isFinite ||
+                                v < 0 ||
+                                (minimum
+                                    ? v > _config.maximumWeight
+                                    : v < _config.minimumWeight)) {
+                              setState(
+                                () => _error = 'Faixa de peso inválida.',
+                              );
+                              return;
+                            }
+                            _save(
+                              _config.copyWith(
+                                minimumWeight: minimum ? v : null,
+                                maximumWeight: minimum ? null : v,
+                              ),
+                            );
+                          },
                   ),
-                  onFieldSubmitted: _saving
-                      ? null
-                      : (text) {
-                          final v = double.tryParse(text.replaceAll(',', '.'));
-                          if (v == null ||
-                              !v.isFinite ||
-                              v < 0 ||
-                              (minimum
-                                  ? v > _config.maximumWeight
-                                  : v < _config.minimumWeight)) {
-                            setState(() => _error = 'Faixa de peso inválida.');
-                            return;
-                          }
-                          _save(
-                            _config.copyWith(
-                              minimumWeight: minimum ? v : null,
-                              maximumWeight: minimum ? null : v,
-                            ),
-                          );
-                        },
+                const Text(
+                  'Pressione Enter em cada campo para salvar nesta estação.',
                 ),
-              const Text(
-                'Pressione Enter em cada campo para salvar nesta estação.',
-              ),
-              DropdownButtonFormField<int>(
-                key: ValueKey('ocr-consensus-${_config.requiredReadings}'),
-                initialValue: _config.requiredReadings,
-                decoration: const InputDecoration(
-                  labelText: 'Leituras consecutivas para confirmar OCR',
-                ),
-                items: [
-                  for (final n in [2, 3, 4, 5])
-                    DropdownMenuItem(value: n, child: Text('$n leituras')),
-                ],
-                onChanged: _saving
-                    ? null
-                    : (n) {
-                        if (n != null) {
-                          _save(_config.copyWith(requiredReadings: n));
-                        }
-                      },
-              ),
-              if (kDebugMode)
-                SwitchListTile(
-                  title: const Text('Diagnóstico OCR'),
-                  subtitle: const Text(
-                    'Mostra imagens e resultados na captura de Pesagem Manual, somente em debug.',
+                DropdownButtonFormField<int>(
+                  key: ValueKey('ocr-consensus-${_config.requiredReadings}'),
+                  initialValue: _config.requiredReadings,
+                  decoration: const InputDecoration(
+                    labelText:
+                        'Leituras concordantes para confirmar OCR (mínimo 80%)',
                   ),
-                  value: _config.diagnostics,
+                  items: [
+                    for (final n in [2, 3, 4, 5])
+                      DropdownMenuItem(value: n, child: Text('$n leituras')),
+                  ],
                   onChanged: _saving
                       ? null
-                      : (v) => _save(_config.copyWith(diagnostics: v)),
+                      : (n) {
+                          if (n != null) {
+                            _save(_config.copyWith(requiredReadings: n));
+                          }
+                        },
                 ),
-            ],
-          ),
+                DropdownButtonFormField<String>(
+                  key: ValueKey(
+                    'ocr-decimals-${_config.expectedDecimalPlaces}',
+                  ),
+                  initialValue:
+                      _config.expectedDecimalPlaces?.toString() ?? 'auto',
+                  decoration: const InputDecoration(
+                    labelText: 'Casas decimais esperadas (somente validação)',
+                  ),
+                  items: [
+                    for (final value in ['auto', '0', '1', '2'])
+                      DropdownMenuItem(
+                        value: value,
+                        child: Text(value == 'auto' ? 'Automático' : value),
+                      ),
+                  ],
+                  onChanged: _saving
+                      ? null
+                      : (value) => _save(
+                          _config.copyWith(
+                            expectedDecimalPlaces: int.tryParse(value ?? ''),
+                            automaticDecimals: value == 'auto',
+                          ),
+                        ),
+                ),
+                if (kDebugMode)
+                  SwitchListTile(
+                    title: const Text('Diagnóstico OCR'),
+                    subtitle: const Text(
+                      'Mostra imagens e resultados na captura de Pesagem Manual, somente em debug.',
+                    ),
+                    value: _config.diagnostics,
+                    onChanged: _saving
+                        ? null
+                        : (v) => _save(_config.copyWith(diagnostics: v)),
+                  ),
+              ],
+            ),
           if (!found && _config.cameraId != null)
             Text(
               'Webcam configurada indisponível: ${_config.cameraName ?? _config.cameraId}',

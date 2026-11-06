@@ -365,7 +365,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         ),
       ),
       const SizedBox(height: 16),
-      ManualWebcamSettings(services: settings.manualCapture),
+      ManualWebcamSettings(
+        services: settings.manualCapture,
+        manualWeighingEnabled: settings.manualWeighingEnabled,
+      ),
     ],
   );
 

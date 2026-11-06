@@ -8,6 +8,7 @@ class WeighingCamera {
 class WebcamConfiguration {
   const WebcamConfiguration({
     this.enabled = true,
+    this.ocrEnabled = false,
     this.cameraId,
     this.cameraName,
     this.mirrorHorizontally = false,
@@ -16,13 +17,20 @@ class WebcamConfiguration {
     this.maximumWeight = 100000,
     this.diagnostics = false,
     this.requiredReadings = 3,
+    this.expectedDecimalPlaces,
+    this.cameraRegions = const {},
   });
   final DisplayRegion region;
   final double minimumWeight, maximumWeight;
   final bool diagnostics;
   final int requiredReadings;
+
+  /// Validation only: never inserts a separator or changes the numeric scale.
+  final int? expectedDecimalPlaces;
+  final Map<String, DisplayRegion> cameraRegions;
   WebcamConfiguration copyWith({
     bool? enabled,
+    bool? ocrEnabled,
     String? cameraId,
     String? cameraName,
     bool? mirrorHorizontally,
@@ -31,22 +39,40 @@ class WebcamConfiguration {
     double? maximumWeight,
     bool? diagnostics,
     int? requiredReadings,
+    int? expectedDecimalPlaces,
+    bool automaticDecimals = false,
   }) => WebcamConfiguration(
     enabled: enabled ?? this.enabled,
+    ocrEnabled: ocrEnabled ?? this.ocrEnabled,
     cameraId: cameraId ?? this.cameraId,
     cameraName: cameraName ?? this.cameraName,
     mirrorHorizontally: mirrorHorizontally ?? this.mirrorHorizontally,
-    region: region ?? this.region,
+    region:
+        region ??
+        (cameraId != null && cameraId != this.cameraId
+            ? cameraRegions[cameraId] ?? const DisplayRegion()
+            : this.region),
     minimumWeight: minimumWeight ?? this.minimumWeight,
     maximumWeight: maximumWeight ?? this.maximumWeight,
     diagnostics: diagnostics ?? this.diagnostics,
     requiredReadings: requiredReadings ?? this.requiredReadings,
+    expectedDecimalPlaces: automaticDecimals
+        ? null
+        : expectedDecimalPlaces ?? this.expectedDecimalPlaces,
+    cameraRegions: {
+      ...cameraRegions,
+      if (this.cameraId != null) this.cameraId!: this.region,
+      if (region != null && (cameraId ?? this.cameraId) != null)
+        (cameraId ?? this.cameraId)!: region,
+    },
   );
   final bool enabled;
+  final bool ocrEnabled;
   final bool mirrorHorizontally;
   final String? cameraId, cameraName;
   Map<String, Object?> toJson() => {
     'enabled': enabled,
+    'ocrEnabled': ocrEnabled,
     'cameraId': cameraId,
     'cameraName': cameraName,
     'mirrorHorizontally': mirrorHorizontally,
@@ -55,10 +81,13 @@ class WebcamConfiguration {
     'maximumWeight': maximumWeight,
     'diagnostics': diagnostics,
     'requiredReadings': requiredReadings,
+    'expectedDecimalPlaces': expectedDecimalPlaces,
+    'cameraRegions': cameraRegions.map((id, r) => MapEntry(id, r.toJson())),
   };
   factory WebcamConfiguration.fromJson(Map<String, dynamic> json) =>
       WebcamConfiguration(
         enabled: json['enabled'] == true,
+        ocrEnabled: json['ocrEnabled'] == true,
         cameraId: json['cameraId'] as String?,
         cameraName: json['cameraName'] as String?,
         mirrorHorizontally: json['mirrorHorizontally'] == true,
@@ -69,6 +98,17 @@ class WebcamConfiguration {
         maximumWeight: (json['maximumWeight'] as num?)?.toDouble() ?? 100000,
         diagnostics: json['diagnostics'] == true,
         requiredReadings: (json['requiredReadings'] as int?)?.clamp(2, 5) ?? 3,
+        expectedDecimalPlaces: [0, 1, 2].contains(json['expectedDecimalPlaces'])
+            ? json['expectedDecimalPlaces'] as int
+            : null,
+        cameraRegions: {
+          if (json['cameraRegions'] is Map)
+            for (final entry in (json['cameraRegions'] as Map).entries)
+              if (entry.value is Map)
+                entry.key.toString(): DisplayRegion.fromJson(
+                  Map<String, dynamic>.from(entry.value),
+                ),
+        },
       );
 }
 
@@ -79,13 +119,15 @@ enum CaptureStage {
   ocrProcessing,
   ocrSuccess,
   manualFallback,
+  manualEntry,
   saving,
   confirmed,
 }
 
 enum WeightSource {
   cameraOcr('CAMERA_OCR'),
-  manualFallback('MANUAL_FALLBACK');
+  manualFallback('MANUAL_FALLBACK'),
+  manualPhoto('MANUAL_WITH_PHOTO');
 
   const WeightSource(this.code);
   final String code;
@@ -117,14 +159,17 @@ class DisplayRegion {
     this.top = .25,
     this.width = .8,
     this.height = .5,
+    this.deskewDegrees = 0,
   });
-  final double left, top, width, height;
+  final double left, top, width, height, deskewDegrees;
   bool get valid =>
       [left, top, width, height].every((v) => v.isFinite) &&
       left >= 0 &&
       top >= 0 &&
       width >= .02 &&
       height >= .02 &&
+      deskewDegrees.isFinite &&
+      deskewDegrees.abs() <= 6 &&
       left + width <= 1.000001 &&
       top + height <= 1.000001;
   factory DisplayRegion.fromJson(Map<String, dynamic> json) {
@@ -133,6 +178,7 @@ class DisplayRegion {
       top: (json['top'] as num?)?.toDouble() ?? .25,
       width: (json['width'] as num?)?.toDouble() ?? .8,
       height: (json['height'] as num?)?.toDouble() ?? .5,
+      deskewDegrees: ((json['deskewDegrees'] as num?)?.toDouble() ?? 0),
     );
     return region.valid ? region : const DisplayRegion();
   }
@@ -141,6 +187,7 @@ class DisplayRegion {
     'top': top,
     'width': width,
     'height': height,
+    'deskewDegrees': deskewDegrees,
   };
 }
 
@@ -158,7 +205,48 @@ class WeightOcrResult {
     this.elapsedMs = 0,
     this.consensusReadings = 0,
     this.requiredReadings = 3,
+    this.normalizedText = '',
+    this.decimalDetected = false,
+    this.decimalPosition,
+    this.characterPositions = const [],
+    this.roiQuality = 1,
+    this.structuralConfidence = 1,
+    this.decimalConfidence = 1,
+    this.temporalConfidence = 1,
+    this.diagnostics = const {},
   });
+  final String normalizedText;
+  final bool decimalDetected;
+  final int? decimalPosition;
+  final List<Map<String, num>> characterPositions;
+  final double roiQuality,
+      structuralConfidence,
+      decimalConfidence,
+      temporalConfidence;
+  final Map<String, Object?> diagnostics;
+  String get recognitionKey => normalizedText.isNotEmpty
+      ? normalizedText
+      : rawText.isNotEmpty
+      ? rawText
+            .trim()
+            .replaceAll(RegExp(r'\s*kg$', caseSensitive: false), '')
+            .replaceAll(',', '.')
+      : weight == null
+      ? ''
+      : weight == weight!.truncateToDouble()
+      ? weight!.toStringAsFixed(0)
+      : weight.toString();
+  String get digitSequence => recognitionKey.replaceAll(RegExp(r'[^0-9]'), '');
+  String get preprocessingPipeline => strategy;
+  int get consensusCount => consensusReadings;
+  String? get failureReason => error;
+  double get candidateConfidence => [
+    confidence,
+    roiQuality,
+    structuralConfidence,
+    decimalConfidence,
+    temporalConfidence,
+  ].reduce((a, b) => a < b ? a : b);
   final List<OcrAttempt> attempts;
   final String strategy;
   final String? engineMessage;
@@ -166,7 +254,7 @@ class WeightOcrResult {
   final int psm, elapsedMs, consensusReadings, requiredReadings;
   double get ocrConfidence => confidence;
   bool get consensus => consensusReadings >= requiredReadings;
-  double get finalConfidence => success && consensus ? confidence : 0;
+  double get finalConfidence => success && consensus ? candidateConfidence : 0;
   WeightOcrResult copyWith({
     String? model,
     int? psm,
@@ -176,10 +264,21 @@ class WeightOcrResult {
     String? failure,
     List<OcrAttempt>? attempts,
     String? strategy,
+    String? normalizedText,
+    double? weight,
+    double? confidence,
+    bool? decimalDetected,
+    int? decimalPosition,
+    List<Map<String, num>>? characterPositions,
+    double? roiQuality,
+    double? structuralConfidence,
+    double? decimalConfidence,
+    double? temporalConfidence,
+    Map<String, Object?>? diagnostics,
   }) => WeightOcrResult(
     rawText: rawText,
-    weight: weight,
-    confidence: confidence,
+    weight: weight ?? this.weight,
+    confidence: confidence ?? this.confidence,
     error: failure ?? error,
     engineMessage: engineMessage,
     model: model ?? this.model,
@@ -189,6 +288,15 @@ class WeightOcrResult {
     requiredReadings: requiredReadings ?? this.requiredReadings,
     attempts: attempts ?? this.attempts,
     strategy: strategy ?? this.strategy,
+    normalizedText: normalizedText ?? this.normalizedText,
+    decimalDetected: decimalDetected ?? this.decimalDetected,
+    decimalPosition: decimalPosition ?? this.decimalPosition,
+    characterPositions: characterPositions ?? this.characterPositions,
+    roiQuality: roiQuality ?? this.roiQuality,
+    structuralConfidence: structuralConfidence ?? this.structuralConfidence,
+    decimalConfidence: decimalConfidence ?? this.decimalConfidence,
+    temporalConfidence: temporalConfidence ?? this.temporalConfidence,
+    diagnostics: diagnostics ?? this.diagnostics,
   );
   final String rawText;
   final double? weight;
@@ -200,9 +308,13 @@ class WeightOcrResult {
       weight != null &&
       weight!.isFinite &&
       confidence.isFinite &&
-      confidence >= threshold &&
+      candidateConfidence.isFinite &&
+      candidateConfidence >= threshold &&
       confidence <= 1;
 }
+
+/// Shared result contract; existing callers retain WeightOcrResult compatibility.
+typedef WeightRecognitionResult = WeightOcrResult;
 
 class OcrAttempt {
   const OcrAttempt(this.strategy, this.image, this.result);
@@ -219,6 +331,12 @@ class OcrAttempt {
     'model': result.model,
     'psm': result.psm,
     'elapsedMs': result.elapsedMs,
+    'normalizedText': result.normalizedText,
+    'decimalDetected': result.decimalDetected,
+    'decimalPosition': result.decimalPosition,
+    'characterPositions': result.characterPositions,
+    'candidateConfidence': result.candidateConfidence,
+    'diagnostics': result.diagnostics,
   };
 }
 
@@ -240,8 +358,10 @@ class ManualWeighingEvidence {
     this.plate = '',
     this.region = const DisplayRegion(),
     this.stableReadings = 0,
+    this.ocrEnabled = true,
   });
   final int stableReadings;
+  final bool ocrEnabled;
   final String id, authorizer, justification, plate;
   final DateTime dateTime;
   final DateTime? confirmedAt;
@@ -284,6 +404,12 @@ class ManualWeighingEvidence {
     'ocrConfidence': ocr.ocrConfidence,
     'ocrFinalConfidence': ocr.finalConfidence,
     'ocrConsensus': ocr.consensus,
+    'ocrEnabled': ocrEnabled,
+    'ocrNormalizedText': ocr.normalizedText,
+    'ocrDecimalDetected': ocr.decimalDetected,
+    'ocrDecimalPosition': ocr.decimalPosition,
+    'ocrCharacterPositions': ocr.characterPositions,
+    'ocrDiagnostics': ocr.diagnostics,
   };
 }
 

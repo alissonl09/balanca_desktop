@@ -1,0 +1,19 @@
+{
+  "fixture": "test/fixtures/weight_ocr/ind570_webcam_570.png",
+  "replayOnly": true,
+  "hardwareCapturePerformed": false,
+  "sameHistoricalImageRepeated": true,
+  "roiWidth": 317,
+  "roiHeight": 104,
+  "cameraSnapshots": 3,
+  "perFrameMs": [
+    695,
+    644,
+    604
+  ],
+  "greenAfterMs": 2475,
+  "normalizedText": "570.0",
+  "confidence": 0.9469219200000001,
+  "passesPerFrame": 2,
+  "consensusCount": 3
+}

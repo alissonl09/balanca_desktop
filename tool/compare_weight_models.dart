@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:balanca_desktop/features/pesagem/manual_capture/capture_models.dart';
+import 'package:balanca_desktop/features/pesagem/manual_capture/decimal_detector.dart';
+import 'package:image/image.dart' as img;
 import 'package:balanca_desktop/features/pesagem/manual_capture/image_processor.dart';
 import 'package:balanca_desktop/features/pesagem/manual_capture/seven_segment_preprocessor.dart';
 import 'package:balanca_desktop/features/pesagem/manual_capture/tesseract_runtime.dart';
@@ -36,6 +38,7 @@ Future<void> main(List<String> args) async {
   );
   await File('${output.path}/roi.png').writeAsBytes(capture.ocrInput);
   final engine = TesseractWeightOcrService();
+  final geometry = analyzeDisplayGeometry(capture.ocrInput);
   final modelDirectory = TesseractRuntime.resolveModelDirectory();
   final report = <Map<String, Object?>>[];
   final baseline = await engine.recognize(capture.ocrInput);
@@ -86,6 +89,26 @@ Future<void> main(List<String> args) async {
             'success': result.success,
             'error': result.error,
             'elapsedMs': result.elapsedMs,
+            'normalizedText': result.normalizedText,
+            'hybridText': reconcileVisualDecimal(
+              result,
+              geometry,
+            ).normalizedText,
+            'hybridWeight': reconcileVisualDecimal(result, geometry).weight,
+            'hybridSuccess': reconcileVisualDecimal(result, geometry).success,
+            'hybridFailure': reconcileVisualDecimal(result, geometry).error,
+            'decimalDetected': reconcileVisualDecimal(
+              result,
+              geometry,
+            ).decimalDetected,
+            'requestedScale': scale,
+            'effectiveScale': effectiveSevenSegmentScale(
+              capture.roiWidth,
+              capture.roiHeight,
+              scale,
+            ),
+            'inputWidth': img.decodePng(entry.value)!.width,
+            'inputHeight': img.decodePng(entry.value)!.height,
           };
           report.add(row);
           stdout.writeln(jsonEncode(row));
@@ -100,6 +123,8 @@ Future<void> main(List<String> args) async {
       'engine': engine.executable,
       'modelDirectory': modelDirectory,
       'comparisonOnly': true,
+      'dimensions': capture.dimensions,
+      'geometry': geometry.toJson(),
       'temporalConsensusTested': false,
       'results': report,
     }),

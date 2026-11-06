@@ -406,7 +406,7 @@ void main() {
           scale: scale,
           experimental: true,
         );
-        expect(variants.length, 8);
+        expect(variants.length, 9);
         expect(variants.keys.any((n) => n.startsWith('adaptive_')), isTrue);
         expect(variants.keys.any((n) => n.startsWith('close1_')), isTrue);
         for (final bytes in variants.values) {

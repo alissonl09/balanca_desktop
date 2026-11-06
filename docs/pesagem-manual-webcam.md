@@ -1,5 +1,11 @@
 # Pesagem Manual assistida por webcam (Windows)
 
+> Comportamento atual: [foto com digitação ou OCR contínuo](ocr-modos-leitura-continua.md),
+> configurável em Configurações Gerais, com OCR desligado por padrão.
+
+> Para o comportamento vigente de decimal, arraste da ROI, resolução, inclinação
+> e consenso, consulte [Diagnóstico do ponto decimal](ocr-decimal-diagnostico.md).
+
 > Atualização de 05/11/2026: a cascata especializada, modelos offline,
 > pré-processamentos, comparação e diagnóstico atuais estão descritos em
 > [OCR de sete segmentos](ocr-sete-segmentos.md). As seções anteriores abaixo

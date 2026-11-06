@@ -4,7 +4,16 @@ import 'package:image/image.dart' as img;
 
 /// Locates a clearly larger display line by geometry, without decoding digits.
 /// Ambiguous layouts retain the complete ROI for the strict OCR parser.
-img.Image isolateDominantWeightLine(img.Image source) {
+class LocatedWeightLine {
+  const LocatedWeightLine(this.image, {this.left = 0, this.top = 0});
+  final img.Image image;
+  final int left, top;
+}
+
+img.Image isolateDominantWeightLine(img.Image source) =>
+    locateDominantWeightLine(source).image;
+
+LocatedWeightLine locateDominantWeightLine(img.Image source) {
   // Bound the component scan, while retaining enough detail for decimal points.
   final image = source.width > 1200
       ? img.copyResize(source, width: 1200)
@@ -125,13 +134,20 @@ img.Image isolateDominantWeightLine(img.Image source) {
     final endY = min(image.height, (bottom + height * .06).ceil());
     candidates.add(Rectangle(x, y, endX - x, endY - y));
   }
-  if (candidates.length != 1) return source;
+  if (candidates.length != 1) return LocatedWeightLine(source);
   final bounds = candidates.single;
-  return img.copyCrop(
-    image,
-    x: bounds.left,
-    y: bounds.top,
-    width: bounds.width,
-    height: bounds.height,
+  final factor = source.width / image.width;
+  final left = (bounds.left * factor).floor(),
+      top = (bounds.top * factor).floor();
+  return LocatedWeightLine(
+    img.copyCrop(
+      source,
+      x: left,
+      y: top,
+      width: (bounds.width * factor).ceil(),
+      height: (bounds.height * factor).ceil(),
+    ),
+    left: left,
+    top: top,
   );
 }

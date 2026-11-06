@@ -9,24 +9,83 @@ import 'dominant_weight_line.dart';
 import 'image_normalizer.dart';
 
 class ProcessedCapture {
-  const ProcessedCapture(this.evidence, this.ocrInput, {this.original});
+  const ProcessedCapture(
+    this.evidence,
+    this.ocrInput, {
+    this.original,
+    this.frameWidth = 0,
+    this.frameHeight = 0,
+    this.roiWidth = 0,
+    this.roiHeight = 0,
+    this.ocrWidth = 0,
+    this.ocrHeight = 0,
+  });
   final Uint8List evidence, ocrInput;
   final Uint8List? original;
+  final int frameWidth, frameHeight, roiWidth, roiHeight, ocrWidth, ocrHeight;
+  Map<String, int> get dimensions => {
+    'frameWidth': frameWidth,
+    'frameHeight': frameHeight,
+    'roiWidth': roiWidth,
+    'roiHeight': roiHeight,
+    'ocrWidth': ocrWidth,
+    'ocrHeight': ocrHeight,
+  };
 }
 
 abstract interface class CaptureImageProcessor {
   Future<ProcessedCapture> process(CapturedPhoto photo, DisplayRegion region);
 }
 
-class LocalCaptureImageProcessor implements CaptureImageProcessor {
+abstract interface class EvidenceOnlyImageProcessor {
+  Future<ProcessedCapture> processEvidence(CapturedPhoto photo);
+}
+
+abstract interface class OcrFrameImageProcessor {
+  Future<ProcessedCapture> processOcrFrame(
+    CapturedPhoto photo,
+    DisplayRegion region,
+  );
+}
+
+class LocalCaptureImageProcessor
+    implements
+        CaptureImageProcessor,
+        EvidenceOnlyImageProcessor,
+        OcrFrameImageProcessor {
   @override
   Future<ProcessedCapture> process(CapturedPhoto photo, DisplayRegion region) =>
       Isolate.run(() => processCapture(photo, region));
+  @override
+  Future<ProcessedCapture> processEvidence(CapturedPhoto photo) => Isolate.run(
+    () => processCapture(photo, const DisplayRegion(), evidenceOnly: true),
+  );
+  @override
+  Future<ProcessedCapture> processOcrFrame(
+    CapturedPhoto photo,
+    DisplayRegion region,
+  ) => Isolate.run(() => processCapture(photo, region, ocrOnly: true));
 }
 
 /// OCR uses the original crop, never the timestamp drawn on the evidence.
-ProcessedCapture processCapture(CapturedPhoto photo, DisplayRegion region) {
+ProcessedCapture processCapture(
+  CapturedPhoto photo,
+  DisplayRegion region, {
+  bool evidenceOnly = false,
+  bool ocrOnly = false,
+}) {
   final image = normalizeCameraImage(photo);
+  final evidence = ocrOnly
+      ? Uint8List(0)
+      : _stampEvidence(image, photo.capturedAt);
+  if (evidenceOnly) {
+    return ProcessedCapture(
+      evidence,
+      Uint8List(0),
+      frameWidth: image.width,
+      frameHeight: image.height,
+    );
+  }
   if (!region.valid) {
     throw const CaptureFailure('ROI_INVALIDA', 'Ajuste a região do visor.');
   }
@@ -37,6 +96,37 @@ ProcessedCapture processCapture(CapturedPhoto photo, DisplayRegion region) {
     width: (image.width * region.width).round(),
     height: (image.height * region.height).round(),
   );
+  // Optional station calibration, applied only to the clean ROI. Expanded
+  // bounds and cubic interpolation preserve corners and the decimal point.
+  if (region.deskewDegrees != 0) {
+    final corner = crop.getPixel(0, 0);
+    crop.backgroundColor = img.ColorRgb8(
+      corner.r.toInt(),
+      corner.g.toInt(),
+      corner.b.toInt(),
+    );
+  }
+  final ocrCrop = region.deskewDegrees == 0
+      ? crop
+      : img.copyRotate(
+          crop,
+          angle: -region.deskewDegrees,
+          interpolation: img.Interpolation.cubic,
+        );
+  return ProcessedCapture(
+    evidence,
+    Uint8List.fromList(img.encodePng(ocrCrop)),
+    original: ocrOnly ? null : Uint8List.fromList(img.encodePng(image)),
+    frameWidth: image.width,
+    frameHeight: image.height,
+    roiWidth: crop.width,
+    roiHeight: crop.height,
+    ocrWidth: ocrCrop.width,
+    ocrHeight: ocrCrop.height,
+  );
+}
+
+Uint8List _stampEvidence(img.Image image, DateTime capturedAt) {
   final evidence = img.copyResize(
     image,
     width: image.width < 640 ? 640 : image.width,
@@ -51,17 +141,13 @@ ProcessedCapture processCapture(CapturedPhoto photo, DisplayRegion region) {
   );
   img.drawString(
     evidence,
-    localTimestamp(photo.capturedAt),
+    localTimestamp(capturedAt),
     font: img.arial24,
     x: 10,
     y: evidence.height - 34,
     color: img.ColorRgb8(255, 255, 255),
   );
-  return ProcessedCapture(
-    Uint8List.fromList(img.encodeJpg(evidence, quality: 95)),
-    Uint8List.fromList(img.encodePng(crop)),
-    original: Uint8List.fromList(img.encodePng(image)),
-  );
+  return Uint8List.fromList(img.encodeJpg(evidence, quality: 95));
 }
 
 /// Bounded variants, computed off the UI isolate. No changes to evidence.

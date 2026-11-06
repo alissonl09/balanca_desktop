@@ -71,6 +71,11 @@ class TesseractRuntime {
 }
 
 String ocrFailureMessage(String? code) => switch (code) {
+  'OCR_DECIMAL_AMBIGUO' ||
+  'OCR_DECIMAL_NAO_CONFIRMADO' ||
+  'OCR_DECIMAL_DIVERGENTE' => 'O ponto decimal não foi confirmado na imagem. Ajuste a ROI, foco e iluminação.',
+  'OCR_CASAS_DECIMAIS_DIVERGENTES' =>
+    'A quantidade de casas decimais difere da configuração do indicador.',
   'OCR_MODELO_ESPECIALIZADO_INDISPONIVEL' => 'O modelo de sete segmentos está ausente. Restaure a pasta ocr/tessdata do pacote completo.',
   'OCR_MODELOS_DIVERGENTES' =>
     'Os modelos OCR discordaram. Ajuste o enquadramento e tente novamente.',

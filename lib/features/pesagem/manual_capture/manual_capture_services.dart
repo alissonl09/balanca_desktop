@@ -5,6 +5,7 @@ import 'image_processor.dart';
 import 'weight_ocr_service.dart';
 import 'seven_segment_ocr_service.dart';
 import 'ocr_diagnostics_store.dart';
+import 'live_weight_ocr_service.dart';
 
 /// Application composition root; tests replace dependencies explicitly.
 class ManualCaptureServices {
@@ -15,6 +16,7 @@ class ManualCaptureServices {
     required this.configurationStore,
     CaptureImageProcessor? processor,
     this.diagnosticsStore,
+    this.liveOcr,
   }) : processor = processor ?? LocalCaptureImageProcessor();
   factory ManualCaptureServices.local() {
     final store = LocalManualWeighingStore();
@@ -24,6 +26,7 @@ class ManualCaptureServices {
         mirrorHorizontally: services.configuration.mirrorHorizontally,
       ),
       ocr: SevenSegmentWeightOcrService(),
+      liveOcr: LiveWeightOcrService(),
       evidenceStore: store,
       configurationStore: store,
       diagnosticsStore: LocalOcrDiagnosticsStore(),
@@ -33,6 +36,7 @@ class ManualCaptureServices {
   static ManualCaptureServices current = ManualCaptureServices.local();
   final WeighingCameraService Function() cameraFactory;
   final WeightOcrService ocr;
+  final WeightOcrService? liveOcr;
   final ManualWeighingEvidenceStore evidenceStore;
   final WebcamConfigurationStore configurationStore;
   final CaptureImageProcessor processor;
@@ -54,6 +58,8 @@ class ManualCaptureServices {
         value.minimumWeight < 0 ||
         value.requiredReadings < 2 ||
         value.requiredReadings > 5 ||
+        (value.expectedDecimalPlaces != null &&
+            ![0, 1, 2].contains(value.expectedDecimalPlaces)) ||
         value.minimumWeight > value.maximumWeight) {
       throw ArgumentError('ROI ou faixa de peso inválida');
     }

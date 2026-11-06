@@ -1,0 +1,290 @@
+{
+  "date": "2026-11-05",
+  "fixture": "test/fixtures/weight_ocr/ind570_webcam_570.png",
+  "historicalFrame": {
+    "height": 720,
+    "width": 1280
+  },
+  "historicalRoi": {
+    "height": 360,
+    "width": 1024
+  },
+  "testCrop": {
+    "left": 307,
+    "width": 317,
+    "top": 137,
+    "height": 104
+  },
+  "expectedText": "570.0",
+  "geometry": {
+    "roiWidth": 317,
+    "roiHeight": 104,
+    "digitHeightPixels": 97.75,
+    "roiQuality": 1.0,
+    "contrast": 0.6745098039215687,
+    "sharpness": 5.446220577529726,
+    "clippedFraction": 0.0,
+    "geometryThreshold": 91,
+    "characterPositions": [
+      {
+        "x": 17,
+        "y": 5,
+        "width": 62,
+        "height": 99
+      },
+      {
+        "x": 82,
+        "y": 6,
+        "width": 63,
+        "height": 98
+      },
+      {
+        "x": 147,
+        "y": 7,
+        "width": 64,
+        "height": 97
+      },
+      {
+        "x": 233,
+        "y": 7,
+        "width": 65,
+        "height": 97
+      }
+    ],
+    "decimalCandidates": [
+      {
+        "x": 213,
+        "y": 82,
+        "width": 18,
+        "height": 18
+      }
+    ]
+  },
+  "beforeAttempts": 288,
+  "afterAttempts": 324,
+  "perModel": [
+    {
+      "model": "7seg",
+      "attempts": 81,
+      "rawAccepted": 0,
+      "rawWrong": 0,
+      "hybridAccepted": 0,
+      "hybridWrong": 0
+    },
+    {
+      "model": "ssd",
+      "attempts": 81,
+      "rawAccepted": 25,
+      "rawWrong": 25,
+      "hybridAccepted": 16,
+      "hybridWrong": 16
+    },
+    {
+      "model": "ssd_int",
+      "attempts": 81,
+      "rawAccepted": 13,
+      "rawWrong": 13,
+      "hybridAccepted": 13,
+      "hybridWrong": 13
+    },
+    {
+      "model": "eng",
+      "attempts": 81,
+      "rawAccepted": 52,
+      "rawWrong": 48,
+      "hybridAccepted": 52,
+      "hybridWrong": 0
+    }
+  ],
+  "productionCascade": [
+    {
+      "syntheticResizeOfRealPhoto": false,
+      "scale": 1.0,
+      "width": 317,
+      "height": 104,
+      "rawText": "5700",
+      "normalizedText": "570.0",
+      "weight": 570.0,
+      "model": "eng",
+      "psm": 7,
+      "pipeline": "display_gray_contrast_2x",
+      "success": true,
+      "ocrConfidence": 0.9469219200000001,
+      "candidateConfidence": 0.9469219200000001,
+      "finalConfidenceSingleFrame": 0.0,
+      "error": null,
+      "elapsedMs": 5143,
+      "decimalDetected": true,
+      "decimalPosition": 3,
+      "diagnostics": {
+        "roiWidth": 317,
+        "roiHeight": 104,
+        "digitHeightPixels": 97.5,
+        "roiQuality": 1.0,
+        "contrast": 0.6745098039215687,
+        "sharpness": 5.546809779367919,
+        "clippedFraction": 0.0,
+        "geometryThreshold": 89,
+        "characterPositions": [
+          {
+            "x": 17,
+            "y": 5,
+            "width": 62,
+            "height": 99
+          },
+          {
+            "x": 82,
+            "y": 6,
+            "width": 63,
+            "height": 98
+          },
+          {
+            "x": 147,
+            "y": 7,
+            "width": 64,
+            "height": 97
+          },
+          {
+            "x": 233,
+            "y": 8,
+            "width": 25,
+            "height": 96
+          }
+        ],
+        "decimalCandidates": [
+          {
+            "x": 213,
+            "y": 82,
+            "width": 18,
+            "height": 18
+          }
+        ],
+        "requestedScale": 2,
+        "effectiveScale": 2.0,
+        "thresholdMethod": "gray",
+        "paddingPixels": 10,
+        "morphology": "none"
+      }
+    },
+    {
+      "syntheticResizeOfRealPhoto": true,
+      "scale": 0.5,
+      "width": 159,
+      "height": 52,
+      "rawText": "5700",
+      "normalizedText": "570.0",
+      "weight": 570.0,
+      "model": "eng",
+      "psm": 7,
+      "pipeline": "grayscale_contrast",
+      "success": true,
+      "ocrConfidence": 0.95690582,
+      "candidateConfidence": 0.95690582,
+      "finalConfidenceSingleFrame": 0.0,
+      "error": null,
+      "elapsedMs": 3846,
+      "decimalDetected": true,
+      "decimalPosition": 3,
+      "diagnostics": {
+        "roiWidth": 159,
+        "roiHeight": 52,
+        "digitHeightPixels": 49.5,
+        "roiQuality": 1.0,
+        "contrast": 0.6745098039215687,
+        "sharpness": 9.943154329946783,
+        "clippedFraction": 0.0,
+        "geometryThreshold": 90,
+        "characterPositions": [
+          {
+            "x": 9,
+            "y": 3,
+            "width": 31,
+            "height": 49
+          },
+          {
+            "x": 41,
+            "y": 3,
+            "width": 32,
+            "height": 49
+          },
+          {
+            "x": 74,
+            "y": 4,
+            "width": 32,
+            "height": 48
+          },
+          {
+            "x": 117,
+            "y": 0,
+            "width": 33,
+            "height": 52
+          }
+        ],
+        "decimalCandidates": [
+          {
+            "x": 107,
+            "y": 41,
+            "width": 9,
+            "height": 9
+          }
+        ]
+      }
+    },
+    {
+      "syntheticResizeOfRealPhoto": true,
+      "scale": 0.25,
+      "width": 79,
+      "height": 26,
+      "rawText": "5700",
+      "normalizedText": "5700",
+      "weight": 5700.0,
+      "model": "eng",
+      "psm": 7,
+      "pipeline": "grayscale_contrast",
+      "success": false,
+      "ocrConfidence": 0.9666837300000001,
+      "candidateConfidence": 0.9666837300000001,
+      "finalConfidenceSingleFrame": 0.0,
+      "error": "OCR_MODELOS_DIVERGENTES",
+      "elapsedMs": 9609,
+      "decimalDetected": false,
+      "decimalPosition": null,
+      "diagnostics": {
+        "roiWidth": 79,
+        "roiHeight": 26,
+        "digitHeightPixels": 24.0,
+        "roiQuality": 1.0,
+        "contrast": 0.6666666666666666,
+        "sharpness": 18.307692307692307,
+        "clippedFraction": 0.0,
+        "geometryThreshold": 91,
+        "characterPositions": [
+          {
+            "x": 5,
+            "y": 2,
+            "width": 15,
+            "height": 24
+          },
+          {
+            "x": 58,
+            "y": 2,
+            "width": 17,
+            "height": 24
+          }
+        ],
+        "decimalCandidates": []
+      }
+    }
+  ],
+  "freshHardwareCapturePerformed": false,
+  "temporalHardwareValidationPerformed": false,
+  "validation": {
+    "dartFormat": "25 files, 0 changes on final verification",
+    "flutterAnalyze": "No issues found",
+    "flutterTest": {
+      "passed": 262,
+      "failed": 0,
+      "skipped": 0
+    }
+  }
+}

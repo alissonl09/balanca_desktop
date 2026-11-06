@@ -3,20 +3,23 @@ import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
+double effectiveSevenSegmentScale(int width, int height, int scale) => math.max(
+  1.0,
+  math.min(scale.toDouble(), math.min(1600 / width, 600 / height)),
+);
+
 /// Operates ONLY on the clean configured ROI. Morphology is an alternative,
 /// never a mandatory transform, and is never applied to the photograph.
 Map<String, Uint8List> prepareSevenSegmentVariants(
   Uint8List bytes, {
   int scale = 2,
   bool experimental = false,
+  bool quick = false,
 }) {
   if (scale < 2 || scale > 4) throw ArgumentError.value(scale, 'scale');
   final source = img.decodeImage(bytes);
   if (source == null) throw const FormatException('Invalid ROI');
-  final factor = math.min(
-    scale.toDouble(),
-    math.min(1600 / source.width, 600 / source.height),
-  );
+  final factor = effectiveSevenSegmentScale(source.width, source.height, scale);
   final resized = img.copyResize(
     source,
     width: math.max(1, (source.width * factor).round()),
@@ -43,10 +46,12 @@ Map<String, Uint8List> prepareSevenSegmentVariants(
   final variants = <String, img.Image>{
     'gray_contrast_${scale}x': normalized,
     'otsu_${scale}x': binary,
-    'adaptive_${scale}x': _adaptive(normalized),
-    'close1_${scale}x': _morph(_morph(binary, dilate: true), dilate: false),
+    if (!quick) 'adaptive_${scale}x': _adaptive(normalized),
+    if (!quick) 'global128_${scale}x': _binarize(normalized, 128),
+    if (!quick) 'inverse_${scale}x': img.invert(img.Image.from(normalized)),
+    if (!quick)
+      'close1_${scale}x': _morph(_morph(binary, dilate: true), dilate: false),
     if (experimental) ...{
-      'inverse_${scale}x': img.invert(img.Image.from(normalized)),
       'denoise_sharpen_${scale}x': img.convolution(
         img.gaussianBlur(img.Image.from(normalized), radius: 1),
         filter: [0, -1, 0, -1, 5, -1, 0, -1, 0],

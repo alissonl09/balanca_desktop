@@ -107,12 +107,17 @@ void main() {
         'balanca_orientation_',
       );
       final store = LocalManualWeighingStore(directory: () async => root);
-      final services = ManualCaptureServices(
-        cameraFactory: () => camera,
-        ocr: ocr,
-        evidenceStore: store,
-        configurationStore: store,
-      )..configuration = const WebcamConfiguration(cameraId: 'usb-device-id');
+      final services =
+          ManualCaptureServices(
+              cameraFactory: () => camera,
+              ocr: ocr,
+              evidenceStore: store,
+              configurationStore: store,
+            )
+            ..configuration = const WebcamConfiguration(
+              cameraId: 'usb-device-id',
+              ocrEnabled: true,
+            );
       final controller = ManualCaptureController(
         authorization: ManualAuthorization(
           user: 'balanca',
