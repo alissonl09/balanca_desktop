@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 
 import 'capture_models.dart';
+import 'display_perspective.dart';
 import 'dominant_weight_line.dart';
 import 'image_normalizer.dart';
 
@@ -13,6 +14,7 @@ class ProcessedCapture {
     this.evidence,
     this.ocrInput, {
     this.original,
+    this.rawRoi,
     this.frameWidth = 0,
     this.frameHeight = 0,
     this.roiWidth = 0,
@@ -21,7 +23,7 @@ class ProcessedCapture {
     this.ocrHeight = 0,
   });
   final Uint8List evidence, ocrInput;
-  final Uint8List? original;
+  final Uint8List? original, rawRoi;
   final int frameWidth, frameHeight, roiWidth, roiHeight, ocrWidth, ocrHeight;
   Map<String, int> get dimensions => {
     'frameWidth': frameWidth,
@@ -82,6 +84,7 @@ ProcessedCapture processCapture(
     return ProcessedCapture(
       evidence,
       Uint8List(0),
+      original: Uint8List.fromList(img.encodePng(image)),
       frameWidth: image.width,
       frameHeight: image.height,
     );
@@ -106,16 +109,18 @@ ProcessedCapture processCapture(
       corner.b.toInt(),
     );
   }
+  final rectified = rectifyDisplay(crop, region.corners);
   final ocrCrop = region.deskewDegrees == 0
-      ? crop
+      ? rectified
       : img.copyRotate(
-          crop,
+          rectified,
           angle: -region.deskewDegrees,
           interpolation: img.Interpolation.cubic,
         );
   return ProcessedCapture(
     evidence,
     Uint8List.fromList(img.encodePng(ocrCrop)),
+    rawRoi: ocrOnly ? null : Uint8List.fromList(img.encodePng(crop)),
     original: ocrOnly ? null : Uint8List.fromList(img.encodePng(image)),
     frameWidth: image.width,
     frameHeight: image.height,

@@ -18,7 +18,10 @@ class LiveWeightReader {
     this.interval = const Duration(milliseconds: 250),
     this.freshness = const Duration(seconds: 2),
   }) : consensus = WeightTemporalConsensus(
-         requiredReadings: configuration.requiredReadings,
+         requiredReadings: configuration.decimalPlaces != null
+             ? 4
+             : configuration.requiredReadings,
+         digitsMode: configuration.decimalPlaces != null,
        );
   final WeighingCameraService camera;
   final CaptureImageProcessor processor;
@@ -67,7 +70,10 @@ class LiveWeightReader {
       if (_lastObservedAt != null &&
           observedAt.difference(_lastObservedAt!) > freshness) {
         consensus = WeightTemporalConsensus(
-          requiredReadings: configuration.requiredReadings,
+          requiredReadings: configuration.decimalPlaces != null
+              ? 4
+              : configuration.requiredReadings,
+          digitsMode: configuration.decimalPlaces != null,
         );
       }
       _lastObservedAt = observedAt;
@@ -91,7 +97,10 @@ class LiveWeightReader {
           _acceptedAt = null;
           result = const WeightOcrResult(error: 'OCR_LEITURA_EXPIRADA');
           consensus = WeightTemporalConsensus(
-            requiredReadings: configuration.requiredReadings,
+            requiredReadings: configuration.decimalPlaces != null
+                ? 4
+                : configuration.requiredReadings,
+            digitsMode: configuration.decimalPlaces != null,
           );
           onChanged();
         });

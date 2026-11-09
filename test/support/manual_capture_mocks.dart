@@ -71,6 +71,14 @@ class MockWeightOcrService implements WeightOcrService {
 
 class MockEvidenceStore
     implements ManualWeighingEvidenceStore, WebcamConfigurationStore {
+  final originals = <String, Uint8List>{};
+  @override
+  Future<String> saveOriginal(String attemptId, Uint8List original) async {
+    final path = 'original/$attemptId.bin';
+    originals[path] = Uint8List.fromList(original);
+    return path;
+  }
+
   final records = <ManualWeighingEvidence>[];
   final photos = <String, Uint8List>{};
   WebcamConfiguration config = const WebcamConfiguration();

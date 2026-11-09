@@ -62,9 +62,9 @@ void main() {
       await controller.initialize();
       await controller.capture();
       expect(controller.finalWeight, 12190);
-      expect(camera.captures, 3);
-      expect(controller.stableReadings, 3);
-      expect(store.records.length, 3);
+      expect(camera.captures, 1);
+      expect(controller.stableReadings, 0);
+      expect(store.records.length, 2);
       expect(controller.manualAllowed, isFalse);
       controller.setManualWeight('99');
       expect(controller.finalWeight, 12190);
@@ -87,26 +87,20 @@ void main() {
     expect(controller.canConfirm, isTrue);
     expect((await controller.confirm())!.finalWeight, 0);
   });
-  test(
-    'changing frames without 80 percent consensus never propose weight',
-    () async {
-      ocr.sequence.addAll([
-        const WeightOcrResult(weight: 12190, confidence: .99),
-        const WeightOcrResult(weight: 12180, confidence: .99),
-        const WeightOcrResult(weight: 12190, confidence: .99),
-        const WeightOcrResult(weight: 12180, confidence: .99),
-        const WeightOcrResult(weight: 12190, confidence: .99),
-      ]);
-      await controller.initialize();
-      await controller.capture();
-      expect(controller.failureReason, 'OCR_LEITURA_INSTAVEL');
-      expect(controller.finalWeight, isNull);
-      expect(controller.manualAllowed, isTrue);
-      expect(controller.stableReadings, 3);
-      expect(camera.captures, 5);
-      expect(store.photos.length, 5);
-    },
-  );
+  test('one capture does not consume results from later photographs', () async {
+    ocr.sequence.addAll([
+      const WeightOcrResult(error: 'OCR_PIPELINES_NO_CONSENSUS'),
+      const WeightOcrResult(weight: 12190, confidence: .99),
+    ]);
+    await controller.initialize();
+    await controller.capture();
+    expect(controller.failureReason, 'OCR_PIPELINES_NO_CONSENSUS');
+    expect(controller.manualAllowed, isTrue);
+    expect(controller.finalWeight, isNull);
+    expect(camera.captures, 1);
+    expect(ocr.sequence.length, 1);
+    expect(store.photos.length, 1);
+  });
   test('out of station range and negative OCR never proposed', () async {
     for (final weight in [-1.0, 100001.0]) {
       ocr.result = WeightOcrResult(weight: weight, confidence: .99);
@@ -117,23 +111,26 @@ void main() {
       expect(controller.imagePath, isNotNull);
     }
   });
-  test('570.0 majority survives a 5700 frame, preserves last photo and requires confirmation', () async {
-    ocr.sequence.addAll([
-      for (final raw in ['570.0', '570.0', '5700', '570.0', '570.0'])
-        parseWeightText(raw, .99),
-    ]);
-    await controller.initialize();
-    await controller.capture();
-    expect(controller.stage, CaptureStage.ocrSuccess);
-    expect(controller.ocr.normalizedText, '570.0');
-    expect(controller.ocr.consensusReadings, 4);
-    expect(controller.ocr.finalConfidence, .98);
-    expect(camera.captures, 5);
-    expect(store.records.every((r) => r.confirmedAt == null), isTrue);
-    expect(controller.imagePath, store.records.last.imagePath);
-    expect(controller.manualAllowed, isFalse);
-    expect((await controller.confirm())!.finalWeight, 570);
-  });
+  test(
+    'static result preserves its single photo and requires confirmation',
+    () async {
+      ocr.sequence.addAll([
+        for (final raw in ['570.0', '570.0', '5700', '570.0', '570.0'])
+          parseWeightText(raw, .99),
+      ]);
+      await controller.initialize();
+      await controller.capture();
+      expect(controller.stage, CaptureStage.ocrSuccess);
+      expect(controller.ocr.normalizedText, '570.0');
+      expect(controller.ocr.consensusReadings, 0);
+      expect(controller.ocr.finalConfidence, .99);
+      expect(camera.captures, 1);
+      expect(store.records.every((r) => r.confirmedAt == null), isTrue);
+      expect(controller.imagePath, store.records.last.imagePath);
+      expect(controller.manualAllowed, isFalse);
+      expect((await controller.confirm())!.finalWeight, 570);
+    },
+  );
   test(
     'hallucinated minus with zero confidence keeps OCR failure and evidence',
     () async {
@@ -404,7 +401,7 @@ void main() {
       expect(
         tester
             .widget<DropdownButtonFormField<String>>(
-              find.byType(DropdownButtonFormField<String>),
+              find.byKey(const ValueKey('manual-webcam-usb-device-id')),
             )
             .initialValue,
         'usb-device-id',

@@ -71,6 +71,22 @@ class TesseractRuntime {
 }
 
 String ocrFailureMessage(String? code) => switch (code) {
+  'OCR_DECIMAL_CONFIG_REQUIRED' =>
+    'Selecione as casas decimais do visor nas configurações da webcam.',
+  'OCR_MAIN_NUMBER_AMBIGUOUS' =>
+    'Há mais de um grupo de números em destaque. Calibre a Área do Peso.',
+  'OCR_PIPELINES_NO_CONSENSUS' => 'As análises desta foto não concordaram com segurança. Capture novamente ou use o peso manual.',
+  'OCR_DIGITS_PENDING_CONSENSUS' =>
+    'Os dígitos ainda não atingiram consenso seguro entre cinco capturas.',
+  'OCR_DECIMAL_CONFIG_INVALID' =>
+    'Configure de 0 a 3 casas decimais conforme o visor físico.',
+  'SEGMENT_ROI_NOT_CALIBRATED' =>
+    'A região do visor precisa ser calibrada em Configurações → Testar câmera.',
+  'SEGMENT_CLIPPED' =>
+    'Os dígitos parecem cortados ou misturados com outros elementos do painel.',
+  'SEGMENT_NEGATIVE' => 'A leitura negativa não pode ser utilizada como peso.',
+  'OCR_LEITURA_EXPIRADA' =>
+    'A leitura anterior expirou. Aguardando uma nova leitura confirmada.',
   'OCR_DECIMAL_AMBIGUO' ||
   'OCR_DECIMAL_NAO_CONFIRMADO' ||
   'OCR_DECIMAL_DIVERGENTE' => 'O ponto decimal não foi confirmado na imagem. Ajuste a ROI, foco e iluminação.',

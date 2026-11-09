@@ -40,6 +40,77 @@ class QuickEngine implements OcrVariantEngine {
 }
 
 void main() {
+  test(
+    'diagnostic image matches prefixed fallback instead of first attempt',
+    () {
+      final first = OcrAttempt(
+        'Canal de cor',
+        Uint8List.fromList([1]),
+        const WeightOcrResult(),
+      );
+      final finalAttempt = OcrAttempt(
+        'display_close1_2x',
+        Uint8List.fromList([2]),
+        const WeightOcrResult(),
+      );
+      expect(
+        selectedDiagnosticAttempt(
+          WeightOcrResult(
+            strategy: 'Tesseract fallback: display_close1_2x',
+            attempts: [first, finalAttempt],
+          ),
+        ),
+        same(finalAttempt),
+      );
+      expect(
+        selectedDiagnosticAttempt(
+          WeightOcrResult(strategy: 'unknown', attempts: [first, finalAttempt]),
+        ),
+        isNull,
+      );
+    },
+  );
+  test(
+    'live status distinguishes calibration, failures and pending consensus',
+    () {
+      expect(
+        liveWeightStatus(
+          const WeightOcrResult(),
+          calibrated: false,
+          ready: false,
+        ),
+        contains('ainda não calibrada'),
+      );
+      expect(
+        liveWeightStatus(
+          const WeightOcrResult(error: 'OCR_TIMEOUT'),
+          calibrated: true,
+          ready: false,
+        ),
+        contains('excedeu o tempo'),
+      );
+      expect(
+        liveWeightStatus(
+          const WeightOcrResult(error: 'OCR_FORMATO_INVALIDO'),
+          calibrated: true,
+          ready: false,
+        ),
+        contains('Não foi possível ler os dígitos'),
+      );
+      final reading = parseWeightText(
+        '570.0',
+        .99,
+      ).copyWith(diagnostics: {'temporalVotes': 2}, requiredReadings: 3);
+      expect(
+        liveWeightStatus(reading, calibrated: true, ready: false),
+        contains('2/3 leituras concordantes'),
+      );
+      expect(
+        liveWeightStatus(reading, calibrated: true, ready: true),
+        contains('Capture o peso para confirmar'),
+      );
+    },
+  );
   ManualCaptureController controllerFor(services) => ManualCaptureController(
     authorization: ManualAuthorization(
       user: 'operador',
@@ -98,7 +169,7 @@ void main() {
       final capture = await LocalCaptureImageProcessor().processEvidence(photo);
       expect(img.decodeJpg(capture.evidence), isNotNull);
       expect(capture.ocrInput, isEmpty);
-      expect(capture.original, isNull);
+      expect(capture.original, isNotNull);
       expect(capture.roiWidth, 0);
     },
   );
@@ -268,8 +339,8 @@ void main() {
       if (c.manualAllowed) c.setManualWeight('570');
       expect(c.canConfirm, isTrue);
       final captures = camera.captures;
-      await tester.ensureVisible(find.text('Voltar para a câmera'));
-      await tester.tap(find.text('Voltar para a câmera'));
+      await tester.ensureVisible(find.text('Capturar novamente'));
+      await tester.tap(find.text('Capturar novamente'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('captured-weight-image')), findsNothing);
       expect(c.stage, CaptureStage.cameraReady);
@@ -288,52 +359,34 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
   }
-  test(
-    'capturing live result preserves its photograph without rerunning OCR',
-    () async {
-      final ocr = MockWeightOcrService()
-        ..result = parseWeightText('570.0', .99);
-      final camera = MockWeighingCameraService(), store = MockEvidenceStore();
-      final services = mockCaptureServices(
-        camera: camera,
-        store: store,
-        configured: true,
-        liveOcr: ocr,
-      );
-      final c = controllerFor(services);
-      addTearDown(c.dispose);
-      final ready = Completer<void>();
-      c.addListener(() {
-        if (c.previewRecognized && !ready.isCompleted) ready.complete();
-      });
-      await c.initialize();
-      await ready.future.timeout(const Duration(seconds: 3));
-      expect(c.recognizedText, '570.0');
-      expect(c.canConfirm, isFalse);
-      expect(store.photos, isEmpty); // no disk evidence for preview frames
-      final calls = ocr.calls, captures = camera.captures;
-      await c.capture();
-      expect(ocr.calls, calls);
-      expect(camera.captures, captures);
-      expect(c.stage, CaptureStage.ocrSuccess);
-      expect(c.manualAllowed, isFalse);
-      expect(c.canConfirm, isTrue);
-      expect(store.photos, hasLength(1));
-      expect(c.capturedImage, store.photos[c.imagePath]);
-      c.resumeCamera();
-      expect(c.capturedImage, isNull);
-      expect(c.canConfirm, isFalse);
-      final resumed = Completer<void>();
-      c.addListener(() {
-        if (c.previewRecognized && !resumed.isCompleted) resumed.complete();
-      });
-      await resumed.future.timeout(const Duration(seconds: 3));
-      await c.capture();
-      c.setManualWeight('999');
-      expect(c.finalWeight, 570);
-      expect((await c.confirm())!.source, WeightSource.cameraOcr);
-    },
-  );
+  test('configured live engine is not polled and capture recognizes only its new photo', () async {
+    final ocr = MockWeightOcrService()..result = parseWeightText('570.0', .99);
+    final camera = MockWeighingCameraService(), store = MockEvidenceStore();
+    final services = mockCaptureServices(
+      camera: camera,
+      store: store,
+      configured: true,
+      ocr: ocr,
+      liveOcr: ocr,
+    );
+    final c = controllerFor(services);
+    addTearDown(c.dispose);
+    await c.initialize();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(ocr.calls, 0);
+    expect(camera.captures, 0);
+    await c.capture();
+    expect(ocr.calls, 1);
+    expect(camera.captures, 1);
+    expect(c.recognizedText, '570');
+    expect(c.canConfirm, isTrue);
+    c.resumeCamera();
+    expect(c.canConfirm, isFalse);
+    expect(ocr.calls, 1);
+    await c.capture();
+    expect(camera.captures, 2);
+    expect((await c.confirm())!.source, WeightSource.cameraOcr);
+  });
   testWidgets(
     'OCR setting is hidden when manual weighing is disabled and persists choices',
     (tester) async {
@@ -363,32 +416,29 @@ void main() {
     },
   );
   testWidgets(
-    'live result fills locked field and green indicator before capture',
+    'preview stays live without recognition before explicit capture',
     (tester) async {
-      final ocr = MockWeightOcrService()
-        ..result = parseWeightText('570.0', .99);
-      final services = mockCaptureServices(configured: true, liveOcr: ocr);
+      final ocr = MockWeightOcrService();
+      final services = mockCaptureServices(
+        configured: true,
+        ocr: ocr,
+        liveOcr: ocr,
+      );
       final c = controllerFor(services);
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(body: ManualCaptureDialog(controller: c)),
         ),
       );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 260));
-      await tester.pump(const Duration(milliseconds: 260));
-      await tester.pump();
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 1));
       final field = tester.widget<TextField>(
         find.byKey(const ValueKey('manual-weight')),
       );
-      expect(field.controller!.text, '570.0');
+      expect(field.controller!.text, isEmpty);
       expect(field.enabled, isFalse);
-      expect(
-        tester
-            .widget<Icon>(find.byKey(const ValueKey('live-ocr-indicator')))
-            .color,
-        Colors.green,
-      );
+      expect(find.byKey(const ValueKey('live-ocr-indicator')), findsNothing);
+      expect(ocr.calls, 0);
       expect(c.canConfirm, isFalse);
       await tester.pumpWidget(const SizedBox());
     },

@@ -1,4 +1,5 @@
 import 'capture_models.dart';
+import 'configured_digits.dart';
 
 class WeightRecognitionRules {
   const WeightRecognitionRules({
@@ -14,6 +15,17 @@ class WeightRecognitionRules {
         minimum < 0 ||
         minimum > maximum) {
       return reading.copyWith(failure: 'OCR_FAIXA_INVALIDA');
+    }
+    if (reading.diagnostics['configuredDigits'] == true) {
+      final value = reading.diagnostics['interpretedValue'];
+      if (value is num &&
+          (!value.isFinite || value < minimum || value > maximum)) {
+        return reading.copyWith(
+          failure: 'OCR_FORA_DA_FAIXA',
+          diagnostics: {...reading.diagnostics, 'numericAndRangeValid': false},
+        );
+      }
+      return reading;
     }
     if (!reading.success) return reading;
     if (!reading.weight!.isFinite ||
@@ -34,16 +46,26 @@ class WeightRecognitionRules {
 /// Bounded window of independent photographs. A vote includes its separator
 /// and precision. Weak/invalid frames never vote and never gain confidence.
 class WeightTemporalConsensus {
-  WeightTemporalConsensus({this.requiredReadings = 3}) {
+  WeightTemporalConsensus({
+    this.requiredReadings = 3,
+    this.digitsMode = false,
+  }) {
     if (requiredReadings < 2 || requiredReadings > 5) {
       throw ArgumentError.value(requiredReadings);
     }
   }
   final int requiredReadings;
+  final bool digitsMode;
   int stableReadings = 0;
   final _window = <WeightOcrResult>[];
-  int get maximumFrames => requiredReadings + 2;
+  final _digits = ConfiguredDigitsConsensus();
+  int get maximumFrames => digitsMode ? 5 : requiredReadings + 2;
   WeightOcrResult observe(WeightOcrResult result) {
+    if (digitsMode || result.diagnostics['configuredDigits'] == true) {
+      final observation = _digits.observe(result);
+      stableReadings = _digits.stableReadings;
+      return observation;
+    }
     _window.add(result);
     if (_window.length > maximumFrames) _window.removeAt(0);
     final matching = _window

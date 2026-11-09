@@ -13,13 +13,16 @@ class WebcamConfiguration {
     this.cameraName,
     this.mirrorHorizontally = false,
     this.region = const DisplayRegion(),
+    this.displayProfile = 'auto',
     this.minimumWeight = 0,
     this.maximumWeight = 100000,
     this.diagnostics = false,
     this.requiredReadings = 3,
     this.expectedDecimalPlaces,
+    this.decimalPlaces,
     this.cameraRegions = const {},
   });
+  final String displayProfile;
   final DisplayRegion region;
   final double minimumWeight, maximumWeight;
   final bool diagnostics;
@@ -27,6 +30,9 @@ class WebcamConfiguration {
 
   /// Validation only: never inserts a separator or changes the numeric scale.
   final int? expectedDecimalPlaces;
+
+  /// Physical display precision; null requires explicit station calibration.
+  final int? decimalPlaces;
   final Map<String, DisplayRegion> cameraRegions;
   WebcamConfiguration copyWith({
     bool? enabled,
@@ -35,13 +41,16 @@ class WebcamConfiguration {
     String? cameraName,
     bool? mirrorHorizontally,
     DisplayRegion? region,
+    String? displayProfile,
     double? minimumWeight,
     double? maximumWeight,
     bool? diagnostics,
     int? requiredReadings,
     int? expectedDecimalPlaces,
+    int? decimalPlaces,
     bool automaticDecimals = false,
   }) => WebcamConfiguration(
+    displayProfile: displayProfile ?? this.displayProfile,
     enabled: enabled ?? this.enabled,
     ocrEnabled: ocrEnabled ?? this.ocrEnabled,
     cameraId: cameraId ?? this.cameraId,
@@ -59,6 +68,7 @@ class WebcamConfiguration {
     expectedDecimalPlaces: automaticDecimals
         ? null
         : expectedDecimalPlaces ?? this.expectedDecimalPlaces,
+    decimalPlaces: decimalPlaces ?? this.decimalPlaces,
     cameraRegions: {
       ...cameraRegions,
       if (this.cameraId != null) this.cameraId!: this.region,
@@ -71,6 +81,7 @@ class WebcamConfiguration {
   final bool mirrorHorizontally;
   final String? cameraId, cameraName;
   Map<String, Object?> toJson() => {
+    'displayProfile': displayProfile,
     'enabled': enabled,
     'ocrEnabled': ocrEnabled,
     'cameraId': cameraId,
@@ -82,10 +93,20 @@ class WebcamConfiguration {
     'diagnostics': diagnostics,
     'requiredReadings': requiredReadings,
     'expectedDecimalPlaces': expectedDecimalPlaces,
+    'decimalPlaces': decimalPlaces,
     'cameraRegions': cameraRegions.map((id, r) => MapEntry(id, r.toJson())),
   };
   factory WebcamConfiguration.fromJson(Map<String, dynamic> json) =>
       WebcamConfiguration(
+        displayProfile:
+            [
+              'auto',
+              'ind560',
+              'ind570',
+              'generic',
+            ].contains(json['displayProfile'])
+            ? json['displayProfile'] as String
+            : 'auto',
         enabled: json['enabled'] == true,
         ocrEnabled: json['ocrEnabled'] == true,
         cameraId: json['cameraId'] as String?,
@@ -97,6 +118,9 @@ class WebcamConfiguration {
         minimumWeight: (json['minimumWeight'] as num?)?.toDouble() ?? 0,
         maximumWeight: (json['maximumWeight'] as num?)?.toDouble() ?? 100000,
         diagnostics: json['diagnostics'] == true,
+        decimalPlaces: [0, 1, 2, 3].contains(json['decimalPlaces'])
+            ? json['decimalPlaces'] as int
+            : null,
         requiredReadings: (json['requiredReadings'] as int?)?.clamp(2, 5) ?? 3,
         expectedDecimalPlaces: [0, 1, 2].contains(json['expectedDecimalPlaces'])
             ? json['expectedDecimalPlaces'] as int
@@ -160,9 +184,37 @@ class DisplayRegion {
     this.width = .8,
     this.height = .5,
     this.deskewDegrees = 0,
+    this.corners = const [],
+    this.calibrated = false,
   });
+
+  /// TL, TR, BR, BL, normalized within this ROI (not the full frame).
+  final List<DisplayPoint> corners;
+  final bool calibrated;
+  DisplayRegion copyWith({bool? calibrated}) => DisplayRegion(
+    left: left,
+    top: top,
+    width: width,
+    height: height,
+    deskewDegrees: deskewDegrees,
+    corners: corners,
+    calibrated: calibrated ?? this.calibrated,
+  );
   final double left, top, width, height, deskewDegrees;
+  bool get perspectiveValid {
+    if (corners.isEmpty) return true;
+    if (corners.length != 4 || corners.any((p) => !p.valid)) return false;
+    for (var i = 0; i < 4; i++) {
+      final a = corners[i], b = corners[(i + 1) % 4], c = corners[(i + 2) % 4];
+      if ((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x) <= .002) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   bool get valid =>
+      perspectiveValid &&
       [left, top, width, height].every((v) => v.isFinite) &&
       left >= 0 &&
       top >= 0 &&
@@ -174,6 +226,17 @@ class DisplayRegion {
       top + height <= 1.000001;
   factory DisplayRegion.fromJson(Map<String, dynamic> json) {
     final region = DisplayRegion(
+      calibrated: json['calibrated'] == true,
+      corners: json['corners'] is List
+          ? [
+              for (final p in json['corners'] as List)
+                if (p is Map)
+                  DisplayPoint(
+                    (p['x'] as num?)?.toDouble() ?? double.nan,
+                    (p['y'] as num?)?.toDouble() ?? double.nan,
+                  ),
+            ]
+          : const [],
       left: (json['left'] as num?)?.toDouble() ?? .1,
       top: (json['top'] as num?)?.toDouble() ?? .25,
       width: (json['width'] as num?)?.toDouble() ?? .8,
@@ -182,13 +245,25 @@ class DisplayRegion {
     );
     return region.valid ? region : const DisplayRegion();
   }
-  Map<String, double> toJson() => {
+  Map<String, Object?> toJson() => {
+    'calibrated': calibrated,
+    if (corners.isNotEmpty)
+      'corners': [
+        for (final p in corners) {'x': p.x, 'y': p.y},
+      ],
     'left': left,
     'top': top,
     'width': width,
     'height': height,
     'deskewDegrees': deskewDegrees,
   };
+}
+
+class DisplayPoint {
+  const DisplayPoint(this.x, this.y);
+  final double x, y;
+  bool get valid =>
+      x.isFinite && y.isFinite && x >= 0 && x <= 1 && y >= 0 && y <= 1;
 }
 
 class WeightOcrResult {
@@ -237,7 +312,18 @@ class WeightOcrResult {
       ? weight!.toStringAsFixed(0)
       : weight.toString();
   String get digitSequence => recognitionKey.replaceAll(RegExp(r'[^0-9]'), '');
+  String get rawDigits => digitSequence;
+  String get integerDigits => recognitionKey.split('.').first;
+  String get profile => diagnostics['profile'] as String? ?? model;
+  int get frameCount => diagnostics['temporalFrames'] as int? ?? 1;
   String get preprocessingPipeline => strategy;
+  double? get finalWeight => success ? weight : null;
+  int? get decimalPlaces => diagnostics['decimalPlaces'] as int?;
+  num? get interpretedValue => diagnostics['interpretedValue'] as num?;
+  String? get originalImagePath => diagnostics['originalImagePath'] as String?;
+  String? get evidenceImagePath => diagnostics['evidenceImagePath'] as String?;
+  String? get processedImagePath =>
+      diagnostics['processedImagePath'] as String?;
   int get consensusCount => consensusReadings;
   String? get failureReason => error;
   double get candidateConfidence => [
@@ -252,9 +338,13 @@ class WeightOcrResult {
   final String? engineMessage;
   final String model;
   final int psm, elapsedMs, consensusReadings, requiredReadings;
-  double get ocrConfidence => confidence;
+  double get ocrConfidence =>
+      (diagnostics['ocrConfidence'] as num?)?.toDouble() ?? confidence;
   bool get consensus => consensusReadings >= requiredReadings;
-  double get finalConfidence => success && consensus ? candidateConfidence : 0;
+  double get finalConfidence =>
+      success && (consensus || diagnostics['analysisKind'] == 'snapshot')
+      ? candidateConfidence
+      : 0;
   WeightOcrResult copyWith({
     String? model,
     int? psm,
@@ -309,7 +399,11 @@ class WeightOcrResult {
       weight!.isFinite &&
       confidence.isFinite &&
       candidateConfidence.isFinite &&
-      candidateConfidence >= threshold &&
+      candidateConfidence >=
+          (diagnostics['configuredDigits'] == true
+              ? (diagnostics['analysisKind'] == 'snapshot' ? .65 : .69)
+              : threshold) &&
+      (diagnostics['configuredDigits'] != true || consensus) &&
       confidence <= 1;
 }
 
@@ -351,6 +445,9 @@ class ManualWeighingEvidence {
     this.cameraId,
     this.cameraName,
     this.imagePath,
+    this.originalImagePath,
+    this.originalSha256,
+    this.captureAttemptId,
     this.ocr = const WeightOcrResult(),
     this.failureReason,
     this.photoFailureReason,
@@ -361,6 +458,7 @@ class ManualWeighingEvidence {
     this.ocrEnabled = true,
   });
   final int stableReadings;
+  final String? originalImagePath, originalSha256, captureAttemptId;
   final bool ocrEnabled;
   final String id, authorizer, justification, plate;
   final DateTime dateTime;
@@ -383,7 +481,14 @@ class ManualWeighingEvidence {
     'cameraId': cameraId,
     'cameraName': cameraName,
     'imagePath': imagePath,
+    'originalImagePath': originalImagePath,
+    'evidenceImagePath': imagePath,
+    'originalSha256': originalSha256,
+    'captureAttemptId': captureAttemptId,
     'ocrRawText': ocr.rawText,
+    'ocrRawDigits': ocr.rawDigits,
+    'ocrDecimalPlaces': ocr.diagnostics['decimalPlaces'],
+    'ocrInterpretedValue': ocr.diagnostics['interpretedValue'],
     'ocrWeight': ocr.weight,
     'confidence': ocr.confidence,
     'ocrError': ocr.error,

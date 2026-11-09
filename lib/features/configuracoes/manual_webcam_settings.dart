@@ -86,7 +86,12 @@ class _ManualWebcamSettingsState extends State<ManualWebcamSettings> {
         cameraId: _config.cameraId!,
         region: _config.region,
         ocr: _config.ocrEnabled
-            ? widget.services.liveOcr ?? widget.services.ocr
+            ? widget.services.recognitionFor(
+                _config.copyWith(
+                  diagnostics: true,
+                  region: _config.region.copyWith(calibrated: true),
+                ),
+              )
             : null,
         processor: widget.services.processor,
         configuration: _config,
@@ -204,8 +209,80 @@ class _ManualWebcamSettingsState extends State<ManualWebcamSettings> {
                   ),
           ),
           if (_config.ocrEnabled)
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey('display-profile-${_config.displayProfile}'),
+                    isExpanded: true,
+                    initialValue: _config.displayProfile,
+                    decoration: InputDecoration(
+                      labelText: _config.region.calibrated ? 'Perfil do visor' : 'Perfil do visor: calibre em Testar c\u00e2mera e salve a ROI',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'auto',
+                        child: Text('Automático'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'ind560',
+                        child: Text('Toledo IND560 (azul/ciano)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'ind570',
+                        child: Text('Toledo IND570 (verde)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'generic',
+                        child: Text('Genérico'),
+                      ),
+                    ],
+                    onChanged: _saving
+                        ? null
+                        : (v) {
+                            if (v != null) {
+                              _save(_config.copyWith(displayProfile: v));
+                            }
+                          },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 220,
+                  child: Tooltip(
+                    message: 'Quantidade de casas exibidas após o separador decimal no indicador. Confirme a configuração física.',
+                    child: DropdownButtonFormField<int>(
+                      key: ValueKey(
+                        'display-decimals-${_config.decimalPlaces}',
+                      ),
+                      initialValue: _config.decimalPlaces,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Casas decimais do visor',
+                      ),
+                      hint: const Text('Selecione: 0 a 3'),
+                      items: [
+                        for (final places in [0, 1, 2, 3])
+                          DropdownMenuItem(
+                            value: places,
+                            child: Text('$places'),
+                          ),
+                      ],
+                      onChanged: _saving
+                          ? null
+                          : (places) {
+                              if (places != null) {
+                                _save(_config.copyWith(decimalPlaces: places));
+                              }
+                            },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          if (_config.ocrEnabled)
             ExpansionTile(
-              title: const Text('Ajustar ROI e validação OCR'),
+              title: const Text('Área do Peso: ROI e validação OCR'),
               children: [
                 const Text(
                   'ROI: enquadre somente o peso principal, sem tara, capacidade ou ícones.',
@@ -231,7 +308,9 @@ class _ManualWebcamSettingsState extends State<ManualWebcamSettings> {
                             if (v == null) return;
                             final r = _config.region;
                             final next = DisplayRegion(
+                              calibrated: true,
                               deskewDegrees: r.deskewDegrees,
+                              corners: r.corners,
                               left: field == 'X' ? v : r.left,
                               top: field == 'Y' ? v : r.top,
                               width: field == 'Largura' ? v : r.width,
@@ -288,50 +367,6 @@ class _ManualWebcamSettingsState extends State<ManualWebcamSettings> {
                   ),
                 const Text(
                   'Pressione Enter em cada campo para salvar nesta estação.',
-                ),
-                DropdownButtonFormField<int>(
-                  key: ValueKey('ocr-consensus-${_config.requiredReadings}'),
-                  initialValue: _config.requiredReadings,
-                  decoration: const InputDecoration(
-                    labelText:
-                        'Leituras concordantes para confirmar OCR (mínimo 80%)',
-                  ),
-                  items: [
-                    for (final n in [2, 3, 4, 5])
-                      DropdownMenuItem(value: n, child: Text('$n leituras')),
-                  ],
-                  onChanged: _saving
-                      ? null
-                      : (n) {
-                          if (n != null) {
-                            _save(_config.copyWith(requiredReadings: n));
-                          }
-                        },
-                ),
-                DropdownButtonFormField<String>(
-                  key: ValueKey(
-                    'ocr-decimals-${_config.expectedDecimalPlaces}',
-                  ),
-                  initialValue:
-                      _config.expectedDecimalPlaces?.toString() ?? 'auto',
-                  decoration: const InputDecoration(
-                    labelText: 'Casas decimais esperadas (somente validação)',
-                  ),
-                  items: [
-                    for (final value in ['auto', '0', '1', '2'])
-                      DropdownMenuItem(
-                        value: value,
-                        child: Text(value == 'auto' ? 'Automático' : value),
-                      ),
-                  ],
-                  onChanged: _saving
-                      ? null
-                      : (value) => _save(
-                          _config.copyWith(
-                            expectedDecimalPlaces: int.tryParse(value ?? ''),
-                            automaticDecimals: value == 'auto',
-                          ),
-                        ),
                 ),
                 if (kDebugMode)
                   SwitchListTile(

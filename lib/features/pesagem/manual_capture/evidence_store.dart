@@ -7,6 +7,7 @@ import 'package:path_provider_windows/path_provider_windows.dart';
 import 'capture_models.dart';
 
 abstract interface class ManualWeighingEvidenceStore {
+  Future<String> saveOriginal(String attemptId, Uint8List original);
   Future<String> savePhoto(String attemptId, Uint8List stampedImage);
   Future<void> save(ManualWeighingEvidence evidence);
 }
@@ -41,6 +42,13 @@ class LocalManualWeighingStore
     // Exclusive create prevents silently replacing prior evidence.
     await file.create(exclusive: true);
     return file;
+  }
+
+  @override
+  Future<String> saveOriginal(String attemptId, Uint8List original) async {
+    final file = await _newFile('original/pesagem_manual_$attemptId.bin');
+    await file.writeAsBytes(original, flush: true);
+    return file.path;
   }
 
   @override

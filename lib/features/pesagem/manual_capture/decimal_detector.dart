@@ -71,11 +71,14 @@ int displayOtsu(img.Image gray) {
   return threshold;
 }
 
-DisplayGeometry analyzeDisplayGeometry(Uint8List bytes) {
+DisplayGeometry analyzeDisplayGeometry(
+  Uint8List bytes, {
+  bool isolateLine = true,
+}) {
   final decoded = img.decodeImage(bytes);
   if (decoded == null) return const DisplayGeometry();
-  final line = locateDominantWeightLine(decoded);
-  final source = line.image;
+  final line = isolateLine ? locateDominantWeightLine(decoded) : null;
+  final source = line?.image ?? decoded;
   final gray = img.grayscale(source);
   final w = gray.width, h = gray.height;
   final threshold = displayOtsu(gray);
@@ -219,11 +222,21 @@ DisplayGeometry analyzeDisplayGeometry(Uint8List bytes) {
   return DisplayGeometry(
     characters: [
       for (final c in characters)
-        math.Rectangle(c.left + line.left, c.top + line.top, c.width, c.height),
+        math.Rectangle(
+          c.left + (line?.left ?? 0),
+          c.top + (line?.top ?? 0),
+          c.width,
+          c.height,
+        ),
     ],
     points: [
       for (final c in points)
-        math.Rectangle(c.left + line.left, c.top + line.top, c.width, c.height),
+        math.Rectangle(
+          c.left + (line?.left ?? 0),
+          c.top + (line?.top ?? 0),
+          c.width,
+          c.height,
+        ),
     ],
     digitHeight: digitHeight,
     quality: quality,

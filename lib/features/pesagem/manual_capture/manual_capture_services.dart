@@ -3,9 +3,8 @@ import 'capture_models.dart';
 import 'evidence_store.dart';
 import 'image_processor.dart';
 import 'weight_ocr_service.dart';
-import 'seven_segment_ocr_service.dart';
+import 'snapshot_weight_recognition.dart';
 import 'ocr_diagnostics_store.dart';
-import 'live_weight_ocr_service.dart';
 
 /// Application composition root; tests replace dependencies explicitly.
 class ManualCaptureServices {
@@ -17,6 +16,7 @@ class ManualCaptureServices {
     CaptureImageProcessor? processor,
     this.diagnosticsStore,
     this.liveOcr,
+    this.recognitionFactory,
   }) : processor = processor ?? LocalCaptureImageProcessor();
   factory ManualCaptureServices.local() {
     final store = LocalManualWeighingStore();
@@ -25,8 +25,11 @@ class ManualCaptureServices {
       cameraFactory: () => DesktopWeighingCameraService(
         mirrorHorizontally: services.configuration.mirrorHorizontally,
       ),
-      ocr: SevenSegmentWeightOcrService(),
-      liveOcr: LiveWeightOcrService(),
+      ocr: SnapshotWeightRecognition(
+        configuration: () => services.configuration,
+      ),
+      recognitionFactory: (config) =>
+          SnapshotWeightRecognition(configuration: () => config),
       evidenceStore: store,
       configurationStore: store,
       diagnosticsStore: LocalOcrDiagnosticsStore(),
@@ -35,6 +38,9 @@ class ManualCaptureServices {
   }
   static ManualCaptureServices current = ManualCaptureServices.local();
   final WeighingCameraService Function() cameraFactory;
+  final WeightOcrService Function(WebcamConfiguration)? recognitionFactory;
+  WeightOcrService recognitionFor(WebcamConfiguration config) =>
+      recognitionFactory?.call(config) ?? ocr;
   final WeightOcrService ocr;
   final WeightOcrService? liveOcr;
   final ManualWeighingEvidenceStore evidenceStore;
@@ -52,7 +58,9 @@ class ManualCaptureServices {
   }
 
   Future<void> configure(WebcamConfiguration value) async {
-    if (!value.region.valid ||
+    if ((value.decimalPlaces != null &&
+            ![0, 1, 2, 3].contains(value.decimalPlaces)) ||
+        !value.region.valid ||
         !value.minimumWeight.isFinite ||
         !value.maximumWeight.isFinite ||
         value.minimumWeight < 0 ||

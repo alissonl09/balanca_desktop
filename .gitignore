@@ -32,6 +32,14 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/tools/weight_vision/dataset/**
+!/tools/weight_vision/dataset/.gitkeep
+/tools/weight_vision/annotations/**
+!/tools/weight_vision/annotations/.gitkeep
+/tools/weight_vision/models/
+/tools/weight_vision/reports/
+/tools/weight_vision/.venv/
+**/__pycache__/
 /runtime/windows/tesseract/
 
 # Symbolication related

@@ -1,0 +1,8 @@
+[
+  {
+    "image": "tools/weight_vision/dataset/ind570_example/roi.png",
+    "expected": "570",
+    "expectedSequence": "570.0",
+    "profile": "ind570"
+  }
+]

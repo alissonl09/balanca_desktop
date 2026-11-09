@@ -30,7 +30,9 @@ class _DisplayRegionEditorState extends State<DisplayRegionEditor> {
     final region = _origin ?? widget.region;
     delta = _total;
     final next = DisplayRegion(
+      calibrated: true,
       deskewDegrees: region.deskewDegrees,
+      corners: region.corners,
       left: resize
           ? region.left
           : (region.left + delta.dx / size.width).clamp(0, 1 - region.width),
@@ -72,25 +74,115 @@ class _DisplayRegionEditorState extends State<DisplayRegionEditor> {
               ),
             ),
           ),
-          Positioned(
-            left: size.width * (region.left + region.width) - 16,
-            top: size.height * (region.top + region.height) - 16,
-            width: 32,
-            height: 32,
-            child: GestureDetector(
-              dragStartBehavior: DragStartBehavior.down,
-              key: const ValueKey('roi-resize'),
-              behavior: HitTestBehavior.opaque,
-              onPanStart: _start,
-              onPanUpdate: (event) => _move(event.delta, size, resize: true),
-              child: const ColoredBox(
-                color: Colors.amber,
-                child: Icon(Icons.open_in_full, size: 18, color: Colors.black),
+          if (region.corners.isEmpty)
+            Positioned(
+              left: size.width * (region.left + region.width) - 16,
+              top: size.height * (region.top + region.height) - 16,
+              width: 32,
+              height: 32,
+              child: GestureDetector(
+                dragStartBehavior: DragStartBehavior.down,
+                key: const ValueKey('roi-resize'),
+                behavior: HitTestBehavior.opaque,
+                onPanStart: _start,
+                onPanUpdate: (event) => _move(event.delta, size, resize: true),
+                child: const ColoredBox(
+                  color: Colors.amber,
+                  child: Icon(
+                    Icons.open_in_full,
+                    size: 18,
+                    color: Colors.black,
+                  ),
+                ),
               ),
             ),
-          ),
+          if (region.corners.isNotEmpty) ...[
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(painter: _PerspectivePainter(region)),
+              ),
+            ),
+            for (var i = 0; i < 4; i++)
+              Positioned(
+                left:
+                    size.width *
+                        (region.left + region.corners[i].x * region.width) -
+                    12,
+                top:
+                    size.height *
+                        (region.top + region.corners[i].y * region.height) -
+                    12,
+                width: 24,
+                height: 24,
+                child: GestureDetector(
+                  key: ValueKey('perspective-corner-$i'),
+                  onPanStart: _start,
+                  onPanUpdate: (event) {
+                    _total += event.delta;
+                    final origin = _origin ?? region;
+                    final corners = List<DisplayPoint>.of(origin.corners);
+                    corners[i] = DisplayPoint(
+                      (origin.corners[i].x +
+                              _total.dx / (size.width * region.width))
+                          .clamp(0, 1),
+                      (origin.corners[i].y +
+                              _total.dy / (size.height * region.height))
+                          .clamp(0, 1),
+                    );
+                    final next = DisplayRegion(
+                      calibrated: true,
+                      left: region.left,
+                      top: region.top,
+                      width: region.width,
+                      height: region.height,
+                      deskewDegrees: region.deskewDegrees,
+                      corners: corners,
+                    );
+                    if (next.valid) widget.onChanged(next);
+                  },
+                  child: DecoratedBox(
+                    decoration: const BoxDecoration(
+                      color: Colors.cyan,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(child: Text('${i + 1}')),
+                  ),
+                ),
+              ),
+          ],
         ],
       );
     },
   );
+}
+
+class _PerspectivePainter extends CustomPainter {
+  const _PerspectivePainter(this.region);
+  final DisplayRegion region;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path();
+    for (var i = 0; i < 4; i++) {
+      final p = region.corners[i];
+      final x = (region.left + p.x * region.width) * size.width,
+          y = (region.top + p.y * region.height) * size.height;
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    path.close();
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = Colors.cyan
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_PerspectivePainter oldDelegate) =>
+      oldDelegate.region != region;
 }

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,9 +13,9 @@ import 'manual_capture_services.dart';
 import 'weight_ocr_service.dart';
 import 'image_processor.dart';
 import 'ocr_diagnostics_store.dart';
-import 'weight_recognition_validation.dart';
+import 'weight_dataset_store.dart';
+import 'captured_image_analysis.dart';
 import 'roi_editor.dart';
-import 'seven_segment_preprocessor.dart';
 import 'tesseract_runtime.dart';
 
 Future<ManualWeighingEvidence?> showManualCapture(
@@ -99,36 +98,6 @@ class _ManualCaptureDialogState extends State<ManualCaptureDialog> {
             const SizedBox(height: 12),
             if (c.busy) const LinearProgressIndicator(),
             Text(c.message),
-            if (c.liveEnabled && c.stage == CaptureStage.cameraReady)
-              Row(
-                children: [
-                  Icon(
-                    c.previewRecognized
-                        ? Icons.check_circle
-                        : Icons.center_focus_weak,
-                    key: const ValueKey('live-ocr-indicator'),
-                    color: c.previewRecognized ? Colors.green : Colors.amber,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      c.previewRecognized
-                          ? 'Número identificado. Capture o peso para confirmar.'
-                          : 'Buscando leitura estável. Enquadre o visor na região marcada.',
-                    ),
-                  ),
-                ],
-              ),
-            if (c.liveEnabled &&
-                c.stage == CaptureStage.cameraReady &&
-                [
-                  'OCR_ENGINE_INDISPONIVEL',
-                  'OCR_MODELO_INDISPONIVEL',
-                  'OCR_TIMEOUT',
-                ].contains(c.liveReader?.result.error))
-              Text(
-                '${ocrFailureMessage(c.liveReader?.result.error)} Você pode capturar a foto e digitar o peso.',
-              ),
             if (c.manualAllowed && c.ocr.weight != null)
               Text(
                 'Leitura OCR descartada: ${formatWeight(c.ocr.weight!)} kg • '
@@ -161,7 +130,7 @@ class _ManualCaptureDialogState extends State<ManualCaptureDialog> {
               ),
             if (c.stage == CaptureStage.ocrSuccess) ...[
               Text(
-                'Peso identificado: ${c.ocr.normalizedText.isEmpty ? formatWeight(c.ocr.weight!) : c.ocr.normalizedText} kg',
+                'Peso identificado: ${formatWeight(c.finalWeight!)} kg',
                 style: const TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
@@ -199,9 +168,7 @@ class _ManualCaptureDialogState extends State<ManualCaptureDialog> {
               ),
               label: Text(
                 c.capturedImage != null
-                    ? 'Voltar para a câmera'
-                    : c.liveEnabled && !c.previewRecognized
-                    ? 'Capturar foto e digitar peso'
+                    ? 'Capturar novamente'
                     : (c.configuration.ocrEnabled
                           ? 'Capturar peso'
                           : 'Capturar foto'),
@@ -260,7 +227,9 @@ class _ManualCaptureDialogState extends State<ManualCaptureDialog> {
                   }
                 }
               : null,
-          child: const Text('Prosseguir'),
+          child: Text(
+            c.stage == CaptureStage.ocrSuccess ? 'Confirmar' : 'Prosseguir',
+          ),
         ),
       ],
     ),
@@ -268,6 +237,33 @@ class _ManualCaptureDialogState extends State<ManualCaptureDialog> {
 }
 
 /// The clock is also burned into the saved image by CaptureImageProcessor.
+/// Describe the actual recognition state rather than implying detection from
+/// the yellow ROI alone. This never enables acceptance or changes OCR rules.
+String liveWeightStatus(
+  WeightOcrResult result, {
+  required bool calibrated,
+  required bool ready,
+}) {
+  if (ready) return 'Número identificado. Capture o peso para confirmar.';
+  if (result.error == 'OCR_DIGITS_PENDING_CONSENSUS') {
+    return 'Dígitos encontrados. Aguardando consenso '
+        '(${result.diagnostics['temporalVotes'] ?? 0}/5 frames concordantes).';
+  }
+  if (result.success) {
+    final votes = result.diagnostics['temporalVotes'] ?? result.consensusCount;
+    return 'Leitura encontrada. Aguardando confirmação entre frames '
+        '($votes/${result.requiredReadings} leituras concordantes).';
+  }
+  if (!calibrated) {
+    return 'Região do visor ainda não calibrada. Em Configurações → '
+        'Testar câmera, marque somente os dígitos do peso e salve a ROI. '
+        'O reconhecimento geométrico está desativado até salvar a calibração.';
+  }
+  if (result.error == null) return 'Analisando os dígitos do visor…';
+  return '${ocrFailureMessage(result.error)} '
+      'Você pode capturar a foto e digitar o peso.';
+}
+
 class CameraEvidencePreview extends StatefulWidget {
   const CameraEvidencePreview({
     super.key,
@@ -444,6 +440,26 @@ class _CameraDiagnosticDialogState extends State<CameraDiagnosticDialog> {
   late DisplayRegion _region = widget.region;
   ProcessedCapture? _capture;
   Map<String, Uint8List> _stages = {};
+  Future<void> _captureDataset() async {
+    if (_analyzing) return;
+    setState(() => _analyzing = true);
+    try {
+      final photo = await widget.camera.capture();
+      final path = await const WeightDatasetStore().save(
+        photo,
+        _region,
+        widget.configuration.displayProfile,
+      );
+      if (mounted) setState(() => _status = 'Amostra salva localmente: $path');
+    } catch (error) {
+      if (mounted) {
+        setState(() => _status = 'Falha ao capturar amostra: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _analyzing = false);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -478,40 +494,36 @@ class _CameraDiagnosticDialogState extends State<CameraDiagnosticDialog> {
     try {
       final photo = await widget.camera.capture();
       if (!mounted) return;
-      final capture = await widget.processor!.process(photo, _region);
-      _capture = capture;
-      if (capture.roiWidth > 0) {
-        try {
-          _stages = await Isolate.run(
-            () => prepareSevenSegmentVariants(capture.ocrInput),
-          );
-        } on FormatException {
-          _stages = {};
-        }
-      }
-      if (!mounted) return;
-      var result = await widget.ocr!.recognize(capture.ocrInput);
-      result = result.copyWith(
-        diagnostics: {...result.diagnostics, ...capture.dimensions},
+      final analysis = await analyzeCapturedImage(
+        photo,
+        configuration: widget.configuration.copyWith(region: _region),
+        processor: widget.processor!,
+        recognition: widget.ocr!,
       );
-      result = WeightRecognitionRules(
-        minimum: widget.configuration.minimumWeight,
-        maximum: widget.configuration.maximumWeight,
-        expectedDecimalPlaces: widget.configuration.expectedDecimalPlaces,
-      ).validate(result);
       if (!mounted) return;
+      _capture = analysis.capture;
+      _result = analysis.result;
+      _stages = {
+        for (final attempt in _result!.attempts)
+          if (attempt.image.isNotEmpty) attempt.strategy: attempt.image,
+      };
       if (kDebugMode && widget.configuration.diagnostics) {
         try {
           _diagnosticPath = await widget.diagnosticsStore?.save(
-            capture,
-            result,
+            _capture!,
+            _result!,
             _region,
           );
         } catch (_) {
           _diagnosticPath = 'Não foi possível salvar o diagnóstico opcional.';
         }
       }
-      if (mounted) setState(() => _result = result);
+      if (mounted) {
+        setState(
+          () => _status =
+              'Imagem de teste analisada. Nenhuma pesagem registrada.',
+        );
+      }
     } catch (_) {
       if (mounted) {
         setState(
@@ -542,6 +554,7 @@ class _CameraDiagnosticDialogState extends State<CameraDiagnosticDialog> {
             camera: widget.camera,
             active: _active,
             status: _status,
+            capturedImage: _capture?.evidence,
             region: _region,
             onRegionChanged: _analyzing
                 ? null
@@ -568,6 +581,8 @@ class _CameraDiagnosticDialogState extends State<CameraDiagnosticDialog> {
                 ? null
                 : (degrees) => setState(() {
                     _region = DisplayRegion(
+                      calibrated: true,
+                      corners: _region.corners,
                       left: _region.left,
                       top: _region.top,
                       width: _region.width,
@@ -579,6 +594,36 @@ class _CameraDiagnosticDialogState extends State<CameraDiagnosticDialog> {
                     _stages = {};
                   }),
           ),
+          SwitchListTile(
+            title: const Text('Corrigir perspectiva (quatro cantos)'),
+            subtitle: const Text(
+              'Arraste os cantos ciano: 1 superior esquerdo, 2 superior direito, 3 inferior direito, 4 inferior esquerdo.',
+            ),
+            value: _region.corners.isNotEmpty,
+            onChanged: _analyzing
+                ? null
+                : (enabled) => setState(() {
+                    _region = DisplayRegion(
+                      calibrated: true,
+                      left: _region.left,
+                      top: _region.top,
+                      width: _region.width,
+                      height: _region.height,
+                      deskewDegrees: _region.deskewDegrees,
+                      corners: enabled
+                          ? const [
+                              DisplayPoint(.02, .02),
+                              DisplayPoint(.98, .02),
+                              DisplayPoint(.98, .98),
+                              DisplayPoint(.02, .98),
+                            ]
+                          : const [],
+                    );
+                    _result = null;
+                    _capture = null;
+                    _stages = {};
+                  }),
+          ),
           Text(_status),
           if (_analyzing) ...[
             const LinearProgressIndicator(),
@@ -586,8 +631,10 @@ class _CameraDiagnosticDialogState extends State<CameraDiagnosticDialog> {
           ],
           if (_result != null)
             SelectableText(
-              '${_result!.success ? 'Leitura' : 'Leitura não confiável'}: ${_result!.recognitionKey} kg\nTexto OCR: ${_result!.rawText}\n'
-              'Confiança OCR: ${(_result!.confidence * 100).toStringAsFixed(1)}%\n'
+              'Status: ${_result!.success ? 'leitura válida' : 'leitura inválida'}\nSequência OCR: ${_result!.recognitionKey}\nTexto OCR: ${_result!.rawText}\n'
+              'Método: ${_result!.strategy} | Peso: ${_result!.weight?.truncate()} kg\n'
+              'Pipelines concordantes: ${_result!.diagnostics['pipelineSupport'] ?? 0}\n'
+              'Confiança: ${(_result!.confidence * 100).toStringAsFixed(1)}%\n'
               'Confiança do quadro: ${(_result!.candidateConfidence * 100).toStringAsFixed(1)}%\n'
               'Frame: ${_capture?.frameWidth}x${_capture?.frameHeight} • ROI: ${_capture?.roiWidth}x${_capture?.roiHeight}\n'
               'ROI após correção de inclinação: ${_capture?.ocrWidth}x${_capture?.ocrHeight}\n'
@@ -596,7 +643,14 @@ class _CameraDiagnosticDialogState extends State<CameraDiagnosticDialog> {
               'Nitidez (gradiente): ${_result!.diagnostics['sharpness']} • contraste: ${_result!.diagnostics['contrast']}\n'
               'Modelo: ${_result!.model}\nPSM: ${_result!.psm}\nPipeline: ${_result!.strategy}\n'
               'Tempo: ${_result!.elapsedMs} ms\nFalha: ${_result!.error ?? '-'}\n'
-              'Diagnóstico de um quadro, sem confirmação temporal e sem registrar pesagem.',
+              'OCR bruto: ${_result!.rawDigits}\n'
+              'Casas decimais: ${widget.configuration.decimalPlaces ?? "não configuradas"}\n'
+              'Valor interpretado: ${_result!.diagnostics['interpretedValue'] ?? "-"}\n'
+              'Peso final: ${_result!.diagnostics['finalWeight'] ?? "não liberado"} kg\n'
+              'OCR confidence: ${(_result!.ocrConfidence * 100).toStringAsFixed(1)}%\n'
+              'Confiança final: ${(_result!.finalConfidence * 100).toStringAsFixed(1)}%\n'
+              'Falha do reconhecimento principal: ${_result!.diagnostics['primaryFailure'] ?? '-'}\n'
+              'Uma foto analisada; consenso entre pipelines, sem registrar pesagem.',
             ),
           if ((_result?.diagnostics['sharpness'] as num? ?? 10) < 2)
             const Text(
@@ -614,27 +668,43 @@ class _CameraDiagnosticDialogState extends State<CameraDiagnosticDialog> {
       ),
     ),
     actions: [
+      if (kDebugMode || widget.configuration.diagnostics)
+        OutlinedButton(
+          onPressed: _active && !_analyzing ? _captureDataset : null,
+          child: const Text('Capturar amostra para dataset'),
+        ),
       TextButton(
         onPressed: _active && !_analyzing
-            ? () => Navigator.pop(context, _region)
+            ? () => Navigator.pop(context, _region.copyWith(calibrated: true))
             : null,
         child: const Text('Salvar ROI'),
       ),
       if (widget.ocr != null)
         OutlinedButton(
           onPressed: _active && !_analyzing ? _testReading : null,
-          child: const Text('Testar leitura'),
+          child: const Text('Capturar imagem de teste'),
         ),
       TextButton(
-        onPressed: () async {
-          await widget.camera.stop();
-          if (context.mounted) Navigator.pop(context);
-        },
+        onPressed: _analyzing
+            ? null
+            : () async {
+                await widget.camera.stop();
+                if (context.mounted) Navigator.pop(context);
+              },
         child: const Text('Fechar'),
       ),
     ],
   );
 }
+
+OcrAttempt? selectedDiagnosticAttempt(WeightOcrResult result) => result.attempts
+    .where(
+      (a) =>
+          a.image.isNotEmpty &&
+          (a.strategy == result.strategy ||
+              result.strategy.endsWith(': ${a.strategy}')),
+    )
+    .lastOrNull;
 
 class OcrDiagnosticImages extends StatelessWidget {
   const OcrDiagnosticImages({
@@ -648,42 +718,58 @@ class OcrDiagnosticImages extends StatelessWidget {
   final WeightOcrResult? result;
   @override
   Widget build(BuildContext context) {
+    final selected = result == null ? null : selectedDiagnosticAttempt(result!);
     final images = <String, Uint8List>{
       if (capture.original != null) 'Frame original': capture.original!,
-      'ROI para OCR': capture.ocrInput,
+      if (capture.rawRoi != null) 'ROI original': capture.rawRoi!,
+      'ROI corrigida': capture.ocrInput,
+      if (result != null)
+        for (final attempt in result!.attempts)
+          if (attempt.image.isNotEmpty) attempt.strategy: attempt.image,
       if (stages['gray_contrast_2x'] != null)
         'Grayscale / contraste': stages['gray_contrast_2x']!,
       if (stages['otsu_2x'] != null) 'Threshold Otsu': stages['otsu_2x']!,
-      if (result != null && result!.attempts.any((a) => a.image.isNotEmpty))
-        'Entrada Tesseract (${result!.strategy})':
-            result!.attempts
-                .where(
-                  (a) => a.image.isNotEmpty && a.strategy == result!.strategy,
-                )
-                .firstOrNull
-                ?.image ??
-            result!.attempts.firstWhere((a) => a.image.isNotEmpty).image,
+      if (selected != null)
+        'Imagem de diagnostico (${result!.strategy})': selected.image,
     };
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final entry in images.entries)
-          SizedBox(
-            width: 260,
-            child: Column(
-              children: [
-                Text(entry.key),
-                Image.memory(
-                  entry.value,
-                  height: 120,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, error, stack) =>
-                      const Text('Imagem indisponível'),
-                ),
-              ],
-            ),
+        if (result != null && result!.attempts.isNotEmpty) ...[
+          const Text(
+            'Resultados por tentativa (imagem legível não garante reconhecimento)',
           ),
+          for (final attempt in result!.attempts)
+            SelectableText(
+              '${attempt.strategy} • modelo: ${attempt.result.model} • PSM: ${attempt.result.psm}\n'
+              'Texto retornado: ${attempt.result.rawText.isEmpty ? "(vazio)" : attempt.result.rawText}\n'
+              'Confiança retornada: ${(attempt.result.confidence * 100).toStringAsFixed(1)}% • '
+              'Falha: ${attempt.result.error ?? "nenhuma"}',
+            ),
+          const SizedBox(height: 12),
+        ],
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final entry in images.entries)
+              SizedBox(
+                width: 260,
+                child: Column(
+                  children: [
+                    Text(entry.key),
+                    Image.memory(
+                      entry.value,
+                      height: 120,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, error, stack) =>
+                          const Text('Imagem indisponível'),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ],
     );
   }

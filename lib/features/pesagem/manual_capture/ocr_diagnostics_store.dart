@@ -45,6 +45,9 @@ class LocalOcrDiagnosticsStore implements OcrDiagnosticsStore {
     if (capture.original != null) {
       await File('${run.path}/original.png').writeAsBytes(capture.original!);
     }
+    if (capture.rawRoi != null) {
+      await File('${run.path}/roi_original.png').writeAsBytes(capture.rawRoi!);
+    }
     await File('${run.path}/roi.png').writeAsBytes(capture.ocrInput);
     await File('${run.path}/evidence.jpg').writeAsBytes(capture.evidence);
     for (var i = 0; i < result.attempts.length; i++) {

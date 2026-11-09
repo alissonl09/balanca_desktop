@@ -502,8 +502,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Testar leitura'));
-      await tester.tap(find.text('Testar leitura'));
+      await tester.ensureVisible(find.text('Capturar imagem de teste'));
+      await tester.tap(find.text('Capturar imagem de teste'));
       await tester.pumpAndSettle();
       expect(camera.captures, 1);
       expect(ocr.calls, 1);
