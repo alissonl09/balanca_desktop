@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:balanca_desktop/core/widgets/visual_components.dart';
 
 import 'package:balanca_desktop/app/balanca_app.dart';
+import 'package:balanca_desktop/features/pesagem/operation_lookup.dart';
 import 'package:balanca_desktop/features/configuracoes/configuracoes_page.dart';
 import 'package:balanca_desktop/features/configuracoes/settings_models.dart';
 import 'package:balanca_desktop/features/pesagem/weighing_preview.dart';
@@ -340,7 +341,9 @@ void main() {
       tester.view.physicalSize = const Size(1366, 768);
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      await tester.pumpWidget(const BalancaApp());
+      await tester.pumpWidget(
+        const BalancaApp(lookupService: DemoOperationLookupService()),
+      );
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'ABC1D23');
       await tapVisible(tester, find.byTooltip('Consultar placa'));

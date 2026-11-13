@@ -1,3 +1,5 @@
+import 'package:balanca_desktop/features/pesagem/operation_lookup.dart';
+
 import 'dart:io';
 
 import 'package:balanca_desktop/app/balanca_app.dart';
@@ -55,7 +57,9 @@ Future<void> open(
   tester.view.physicalSize = size;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
-  await tester.pumpWidget(const BalancaApp());
+  await tester.pumpWidget(
+    const BalancaApp(lookupService: DemoOperationLookupService()),
+  );
   await tester.pumpAndSettle();
   await tap(tester, key('menu-$menu'));
 }
@@ -90,7 +94,9 @@ void main() {
     tester.view.physicalSize = const Size(1366, 768);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(const BalancaApp());
+    await tester.pumpWidget(
+      const BalancaApp(lookupService: DemoOperationLookupService()),
+    );
     await tester.pumpAndSettle();
     void expectVehicleBoxHeights() {
       final plate = find.byWidgetPredicate(

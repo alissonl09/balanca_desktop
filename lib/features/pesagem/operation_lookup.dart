@@ -1,11 +1,12 @@
 import '../../core/offline/offline_models.dart';
+import '../../core/libra/pre_ticket_dto.dart';
 import '../../core/offline/pre_ticket_source.dart';
 import 'operation_preview.dart';
 import 'weighing_preview.dart';
 
 enum OperationMode { manual, integrada }
 
-/// Resultado local tipado de apresentação, sem presumir DTO ou endpoint novo.
+/// Resultado de apresentação, com documentos remotos quando disponíveis.
 class OperationLookup {
   OperationLookup({
     required Map<String, String> values,
@@ -13,13 +14,16 @@ class OperationLookup {
     this.summary = const WeighingSummary(),
     this.phase = WeighingPhase.nova,
     this.origin = PreTicketOrigin.local,
+    List<PreTicketDto> preTickets = const [],
   }) : values = Map.unmodifiable(values),
-       trailers = List.unmodifiable(trailers);
+       trailers = List.unmodifiable(trailers),
+       preTickets = List.unmodifiable(preTickets);
   final Map<String, String> values;
   final List<String> trailers;
   final WeighingSummary summary;
   final WeighingPhase phase;
   final PreTicketOrigin origin;
+  final List<PreTicketDto> preTickets;
 }
 
 abstract interface class OperationLookupService {
@@ -29,6 +33,7 @@ abstract interface class OperationLookupService {
 /// Fixtures já existentes, explicitamente disponíveis localmente nesta demo.
 /// Placa desconhecida retorna null, nunca cria dados de operação fictícios.
 class DemoOperationLookupService implements OperationLookupService {
+  const DemoOperationLookupService();
   @override
   Future<OperationLookup?> lookup(
     String plate,

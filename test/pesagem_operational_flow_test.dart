@@ -1,6 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'support/libra_http_fake.dart';
+
+import 'package:balanca_desktop/core/libra/libra_api_client.dart';
+import 'package:balanca_desktop/core/libra/libra_configuration.dart';
+import 'package:balanca_desktop/features/pesagem/pre_ticket_service.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -40,6 +46,7 @@ Future<void> render(
   OperationLookupService? lookup,
   OfflineStation? station,
   PesagemEditService? editService,
+  SettingsState? settings,
 }) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = const Size(1366, 900);
@@ -51,9 +58,10 @@ Future<void> render(
       home: Scaffold(
         body: PesagemPage(
           ticketSession: session,
-          lookupService: lookup,
+          lookupService: lookup ?? const DemoOperationLookupService(),
           station: station,
           editService: editService,
+          settings: settings,
         ),
       ),
     ),
@@ -94,6 +102,79 @@ void windowsTestWidgets(String name, WidgetTesterCallback callback) =>
     );
 
 void main() {
+  windowsTestWidgets(
+    'resposta HTTP preenche campos reais, bloqueia duplicação e muda unidade',
+    (tester) async {
+      final settings = SettingsState()
+        ..environment = StationEnvironment.desenvolvimento;
+      addTearDown(settings.dispose);
+      final session = TicketSession();
+      final response = Completer<HttpClientResponse>();
+      final requests = <TestClient>[];
+      final service = PreTicketService(
+        settings: settings,
+        configuration: LibraConfiguration(
+          environment: {'LIBRA_API_KEY_DSV': 'synthetic-test-placeholder'},
+        ),
+        client: LibraApiClient(
+          clientFactory: () {
+            final http = requests.isEmpty
+                ? TestClient(result: () => response.future)
+                : TestClient(body: payload);
+            requests.add(http);
+            return http;
+          },
+        ),
+      );
+      await render(
+        tester,
+        session: session,
+        settings: settings,
+        lookup: service,
+      );
+      await tester.enterText(input('Carreta'), 'XYZ9H87');
+      await tester.enterText(input('Placa'), 'abc-1d23');
+      final button = find.byTooltip('Consultar placa');
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await tester.pump();
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(
+        tester
+            .widget<IconButton>(
+              find.ancestor(of: button, matching: find.byType(IconButton)),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(requests, hasLength(1));
+      response.complete(TestResponse(200, payload));
+      await tester.pumpAndSettle();
+      expect(session.operationMode, OperationMode.integrada);
+      expect(session.officialOperation['Motorista'], 'Motorista de teste');
+      expect(session.officialOperation['Nº Nota(s) / Documento(s)'], '1; 2');
+      expect(session.officialOperation['Peso N.F. (Kg)'], '1234.5');
+      expect(session.preTickets.single.tipoOperacao, 'XFER');
+      expect(
+        tester.widget<TextField>(input('Carreta')).controller!.text,
+        'XYZ9H87',
+      );
+      expect(tester.widget<TextField>(input('Carreta')).readOnly, isFalse);
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is ReadOnlyValueField && w.label == 'Motorista',
+        ),
+        findsOneWidget,
+      );
+      settings.update(() => settings.unitCode = 9);
+      await tester.pumpAndSettle();
+      expect(session.officialOperation, isEmpty);
+      await lookupPlate(tester, 'ABC1D23');
+      expect(requests.last.uri!.queryParameters['cdUnidadeBalanca'], '9');
+      expect(session.operationMode, OperationMode.integrada);
+    },
+  );
+
   setUpAll(() async {
     if (Platform.isWindows) {
       final fonts = FontLoader('Arial');
@@ -357,6 +438,13 @@ void main() {
           }
           await tester.sendKeyEvent(LogicalKeyboardKey.escape);
           await tester.pumpAndSettle();
+          if (a == PesagemAction.pesar) {
+            expect(result(), findsOneWidget);
+            await tap(
+              tester,
+              find.descendant(of: result(), matching: find.text('Cancelar')),
+            );
+          }
           expect(result(), findsNothing);
         }
       },

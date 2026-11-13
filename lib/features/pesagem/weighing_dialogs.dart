@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/theme/app_colors.dart';
 import 'preview_authentication.dart';
@@ -11,10 +13,20 @@ import '../../core/permissions/permission_models.dart';
 
 Future<bool?> showWeighingConfirmation(
   BuildContext context,
-  WeighingPreview preview,
-) => showDialog<bool>(
+  WeighingPreview preview, {
+  required FutureOr<void> Function() onSave,
+}) => showDialog<bool>(
   context: context,
-  builder: (_) => _ConfirmationDialog(preview: preview),
+  barrierDismissible: false,
+  requestFocus: true,
+  traversalEdgeBehavior: TraversalEdgeBehavior.closedLoop,
+  builder: (_) => PopScope<bool>(
+    canPop: false,
+    child: CallbackShortcuts(
+      bindings: {const SingleActivator(LogicalKeyboardKey.escape): () {}},
+      child: _ConfirmationDialog(preview: preview, onSave: onSave),
+    ),
+  ),
 );
 
 Future<ManualAuthorization?> showManualAuthentication(
@@ -25,9 +37,38 @@ Future<ManualAuthorization?> showManualAuthentication(
   builder: (_) => _AuthenticationDialog(permissions: permissions),
 );
 
-class _ConfirmationDialog extends StatelessWidget {
-  const _ConfirmationDialog({required this.preview});
+class _ConfirmationDialog extends StatefulWidget {
+  const _ConfirmationDialog({required this.preview, required this.onSave});
   final WeighingPreview preview;
+  final FutureOr<void> Function() onSave;
+
+  @override
+  State<_ConfirmationDialog> createState() => _ConfirmationDialogState();
+}
+
+class _ConfirmationDialogState extends State<_ConfirmationDialog> {
+  WeighingPreview get preview => widget.preview;
+  bool _saving = false;
+  String? _error;
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.onSave();
+      if (mounted) Navigator.pop(context, true);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = 'Não foi possível salvar a pesagem. Verifique as permissões e tente novamente.';
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -171,6 +212,12 @@ class _ConfirmationDialog extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 14),
+            if (_error != null)
+              Text(
+                _error!,
+                key: const ValueKey('weighing-confirmation-error'),
+                style: const TextStyle(color: Colors.red),
+              ),
             const Text(
               'Simulação local • sem gravação definitiva.',
               style: TextStyle(fontSize: 13, color: AppColors.muted),
@@ -180,7 +227,7 @@ class _ConfirmationDialog extends StatelessWidget {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context, false),
+          onPressed: _saving ? null : () => Navigator.pop(context, false),
           child: const Text('Cancelar'),
         ),
         ElevatedButton(
@@ -188,7 +235,7 @@ class _ConfirmationDialog extends StatelessWidget {
             backgroundColor: AppColors.green,
             foregroundColor: Colors.white,
           ),
-          onPressed: () => Navigator.pop(context, true),
+          onPressed: _saving ? null : _save,
           child: const Text('Salvar Pesagem'),
         ),
       ],

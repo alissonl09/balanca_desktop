@@ -13,6 +13,7 @@ import 'package:balanca_desktop/core/permissions/permission_models.dart';
 import 'package:balanca_desktop/features/configuracoes/settings_models.dart';
 import 'package:balanca_desktop/features/configuracoes/configuracoes_page.dart';
 import 'package:balanca_desktop/features/pesagem/pesagem_page.dart';
+import 'package:balanca_desktop/features/pesagem/operation_lookup.dart';
 import 'package:balanca_desktop/features/pesagem/weighing_preview.dart';
 import 'package:balanca_desktop/features/access_control/access_control_state.dart';
 import 'package:balanca_desktop/features/access_control/access_control_panel.dart';
@@ -65,7 +66,11 @@ Future<void> mount(
                     ticketSession: session ?? TicketSession(),
                   ),
                 )
-              : PesagemPage(settings: settings, ticketSession: session),
+              : PesagemPage(
+                  settings: settings,
+                  ticketSession: session,
+                  lookupService: const DemoOperationLookupService(),
+                ),
         ),
       ),
     ),

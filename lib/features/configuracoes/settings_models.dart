@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../../core/libra/libra_settings_store.dart';
+
 import '../../core/indicators/indicator_models.dart';
 import '../../core/indicators/indicator_driver.dart';
 import '../../core/permissions/permission_models.dart';
@@ -94,9 +96,25 @@ class SettingsState extends ChangeNotifier {
   SettingsState({
     GateEquipmentSource? gateEquipmentSource,
     ManualCaptureServices? manualCapture,
+    LibraSettingsStore? libraStore,
+    LibraSettingsData? libraSettings,
   }) : gateEquipmentSource =
            gateEquipmentSource ?? const MockGateEquipmentSource(),
-       manualCapture = manualCapture ?? ManualCaptureServices.current;
+       manualCapture = manualCapture ?? ManualCaptureServices.current,
+       libraStore = libraStore ?? MemoryLibraSettingsStore(),
+       libra = libraSettings ?? LibraSettingsData() {
+    environment = StationEnvironment.values.firstWhere(
+      (e) => e.name == libra.selectedEnvironment,
+      orElse: () => StationEnvironment.homologacao,
+    );
+  }
+  final LibraSettingsStore libraStore;
+  final LibraSettingsData libra;
+  Future<void> saveLibraSettings() {
+    libra.selectedEnvironment = environment.name;
+    return libraStore.save(libra);
+  }
+
   final ManualCaptureServices manualCapture;
   final GateEquipmentSource gateEquipmentSource;
   bool manualWeighingEnabled = true;

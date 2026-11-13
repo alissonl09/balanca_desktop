@@ -21,6 +21,9 @@ import '../configuracoes/settings_models.dart';
 import '../ticket/ticket_mapper.dart';
 import '../ticket/ticket_preview.dart';
 import 'operation_lookup.dart';
+import 'pre_ticket_service.dart';
+import '../../core/libra/libra_api_client.dart';
+import '../../core/libra/libra_configuration.dart';
 import 'pesagem_edit_service.dart';
 import 'pesagem_actions.dart';
 import 'pesagem_action_bar.dart';
@@ -32,7 +35,7 @@ import '../../core/permissions/permission_models.dart';
 
 import 'package:flutter/foundation.dart' show kDebugMode;
 
-/// Interface de pesagem com consulta local de demonstração.
+/// Interface de pesagem com consulta real ou modo mock explícito.
 class PesagemPage extends StatefulWidget {
   const PesagemPage({
     super.key,
@@ -63,8 +66,16 @@ class _PesagemPageState extends State<PesagemPage> {
     _settings.permissions,
   ]);
   void _refreshOperationalSettings() {
+    if (_foundPlate != null &&
+        (_consultedUnit != _settings.unitCode ||
+            _consultedEnvironment != _settings.environment)) {
+      _clearLookup();
+    }
     if (mounted) setState(() {});
   }
+
+  int? _consultedUnit;
+  StationEnvironment? _consultedEnvironment;
 
   final _plate = TextEditingController();
   final _trailer = TextEditingController();
@@ -91,8 +102,15 @@ class _PesagemPageState extends State<PesagemPage> {
   final _operationFocus = <String, FocusNode>{
     for (final label in _operationFields) label: FocusNode(debugLabel: label),
   };
+  late final _libraConfiguration = LibraConfiguration();
   late final _lookupService =
-      widget.lookupService ?? DemoOperationLookupService();
+      widget.lookupService ??
+      (_libraConfiguration.mock
+          ? DemoOperationLookupService()
+          : PreTicketService(
+              settings: _settings,
+              configuration: _libraConfiguration,
+            ));
   late final _editService = widget.editService ?? MemoryPesagemEditService();
   bool _actionModalOpen = false, _saving = false, _lookingUp = false;
   int _lookupGeneration = 0;
@@ -138,6 +156,8 @@ class _PesagemPageState extends State<PesagemPage> {
       }
       _summary = current.summary;
       _foundPlate = _ticketSession.consultedPlate;
+      _consultedUnit = _ticketSession.consultedUnitCode;
+      _consultedEnvironment = _ticketSession.consultedEnvironment;
       _trailers = List.of(_ticketSession.trailerOptions);
       _lastConfirmedPreview = _ticketSession.confirmed;
     }
@@ -150,7 +170,14 @@ class _PesagemPageState extends State<PesagemPage> {
     _trailerFocus.skipTraversal = _trailers.length == 1;
     _publishTicketData();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _plateFocus.requestFocus();
+      if (!mounted) return;
+      if (_foundPlate != null &&
+          _consultedUnit != null &&
+          (_consultedUnit != _settings.unitCode ||
+              _consultedEnvironment != _settings.environment)) {
+        _clearLookup();
+      }
+      _plateFocus.requestFocus();
     });
   }
 
@@ -184,6 +211,8 @@ class _PesagemPageState extends State<PesagemPage> {
     }
     _ticketSession.current = current;
     _ticketSession.consultedPlate = _foundPlate;
+    _ticketSession.consultedUnitCode = _consultedUnit;
+    _ticketSession.consultedEnvironment = _consultedEnvironment;
     _ticketSession.trailerOptions = List.of(_trailers);
     _ticketSession.draftOperation = _draft;
   }
@@ -298,52 +327,56 @@ class _PesagemPageState extends State<PesagemPage> {
         capturedAt: capturedAt,
         manualEvidence: evidence,
       );
-      final confirmed = await showWeighingConfirmation(context, preview);
-      if (!mounted || confirmed != true) return;
-      if (!_actionEnabled(
-        manual ? PesagemAction.manual : PesagemAction.pesar,
-      )) {
-        return;
-      }
-      if (authorization != null &&
-          !_settings.permissions.userAllows(
-            authorization.user,
-            AppPermission.authorizeManual,
+      await showWeighingConfirmation(
+        context,
+        preview,
+        onSave: () {
+          if (!_actionEnabled(
+            manual ? PesagemAction.manual : PesagemAction.pesar,
           )) {
-        return;
-      }
-      setState(() {
-        _lastConfirmedPreview = preview;
-        // Só a confirmação de captura válida altera o ciclo. Salvar dados não.
-        if (capturedAt != null && weight > 0) {
-          if (_ticketSession.phase == WeighingPhase.nova) {
-            _summary = WeighingSummary(
-              first: weight,
-              firstWeighedAt: capturedAt,
-            );
-            _ticketSession.phase = WeighingPhase.aberta;
-          } else {
-            _summary = WeighingSummary(
-              first: _summary.first,
-              firstWeighedAt: _summary.firstWeighedAt,
-              second: weight,
-              secondWeighedAt: capturedAt,
-              net: _summary.net,
-              dry: _summary.dry,
-            );
-            _ticketSession.phase = WeighingPhase.fechada;
+            throw StateError('Permissão de pesagem indisponível.');
           }
-        }
-      });
-      // Um indicador desconectado não substitui uma captura manual existente.
-      if (preview.isManual) _ticketSession.recordManualReading(preview);
-      if (preview.capturedAt != null || _ticketSession.confirmed == null) {
-        _ticketSession.confirmed = preview;
-      }
-      _publishTicketData(commitOperation: true);
-      _message(
-        'Pesagem de ${formatWeight(_lastConfirmedPreview!.currentWeight)} Kg confirmada em simulação local. '
-        '${manual ? 'Auditoria da captura salva localmente. Nenhuma integração foi acionada.' : 'Nenhum dado foi persistido.'}',
+          if (authorization != null &&
+              !_settings.permissions.userAllows(
+                authorization.user,
+                AppPermission.authorizeManual,
+              )) {
+            throw StateError('Permissão de pesagem indisponível.');
+          }
+          setState(() {
+            _lastConfirmedPreview = preview;
+            // Só a confirmação de captura válida altera o ciclo. Salvar dados não.
+            if (capturedAt != null && weight > 0) {
+              if (_ticketSession.phase == WeighingPhase.nova) {
+                _summary = WeighingSummary(
+                  first: weight,
+                  firstWeighedAt: capturedAt,
+                );
+                _ticketSession.phase = WeighingPhase.aberta;
+              } else {
+                _summary = WeighingSummary(
+                  first: _summary.first,
+                  firstWeighedAt: _summary.firstWeighedAt,
+                  second: weight,
+                  secondWeighedAt: capturedAt,
+                  net: _summary.net,
+                  dry: _summary.dry,
+                );
+                _ticketSession.phase = WeighingPhase.fechada;
+              }
+            }
+          });
+          // Um indicador desconectado não substitui uma captura manual existente.
+          if (preview.isManual) _ticketSession.recordManualReading(preview);
+          if (preview.capturedAt != null || _ticketSession.confirmed == null) {
+            _ticketSession.confirmed = preview;
+          }
+          _publishTicketData(commitOperation: true);
+          _message(
+            'Pesagem de ${formatWeight(_lastConfirmedPreview!.currentWeight)} Kg confirmada em simulação local. '
+            '${manual ? 'Auditoria da captura salva localmente. Nenhuma integração foi acionada.' : 'Nenhum dado foi persistido.'}',
+          );
+        },
       );
     } finally {
       _weighingFlowOpen = false;
@@ -365,13 +398,16 @@ class _PesagemPageState extends State<PesagemPage> {
       return;
     }
     final generation = ++_lookupGeneration;
-    _lookingUp = true;
+    setState(() => _lookingUp = true);
+    final unit = _settings.unitCode;
+    final environment = _settings.environment;
     try {
-      final connection =
-          widget.station?.connection ?? StationConnection.offline;
+      final connection = widget.station?.connection ?? StationConnection.online;
       final result = await _lookupService.lookup(plate, connection);
       if (!mounted ||
           generation != _lookupGeneration ||
+          unit != _settings.unitCode ||
+          environment != _settings.environment ||
           normalizePlate(_plate.text) != plate) {
         return;
       }
@@ -384,6 +420,8 @@ class _PesagemPageState extends State<PesagemPage> {
           !(offline && result.origin == PreTicketOrigin.remota);
       setState(() {
         _foundPlate = integrated ? plate : null;
+        _consultedUnit = integrated ? unit : null;
+        _consultedEnvironment = integrated ? environment : null;
         if (integrated) _plate.text = plate;
         _ticketSession.operationMode = integrated
             ? OperationMode.integrada
@@ -391,10 +429,13 @@ class _PesagemPageState extends State<PesagemPage> {
         _ticketSession.officialOperation = integrated
             ? result.values
             : const {};
+        _ticketSession.preTickets = integrated ? result.preTickets : const [];
         _trailers = integrated ? result.trailers : [];
         _trailerFocus.skipTraversal = _trailers.length == 1;
         if (integrated) {
-          _trailer.text = _trailers.length == 1 ? _trailers.single : '';
+          if (result.origin == PreTicketOrigin.local || _trailers.isNotEmpty) {
+            _trailer.text = _trailers.length == 1 ? _trailers.single : '';
+          }
           for (final e in result.values.entries) {
             _operationControllers[e.key]?.text = e.value;
           }
@@ -405,18 +446,30 @@ class _PesagemPageState extends State<PesagemPage> {
       });
       _publishTicketData(commitOperation: true);
       if (!integrated) {
-        _message('Placa não encontrada nas operações simuladas.');
+        _message(
+          _lookupService is DemoOperationLookupService
+              ? 'Placa não encontrada nas operações simuladas.'
+              : 'Nenhum pré-ticket encontrado para esta placa.',
+        );
       }
       if (_trailerFocus.hasFocus && _trailerFocus.skipTraversal) {
         _trailerFocus.nextFocus();
       }
     } catch (error) {
-      if (mounted && generation == _lookupGeneration) {
+      if (mounted &&
+          generation == _lookupGeneration &&
+          unit == _settings.unitCode &&
+          environment == _settings.environment &&
+          normalizePlate(_plate.text) == plate) {
         // Sem resultado, a entrada permanece manual, sem inventar operação.
-        _message('Consulta indisponível. Preencha os dados manualmente.');
+        _message(
+          error is LibraException
+              ? error.message
+              : 'Consulta indisponível. Preencha os dados manualmente.',
+        );
       }
     } finally {
-      _lookingUp = false;
+      if (mounted) setState(() => _lookingUp = false);
     }
   }
 
@@ -431,6 +484,8 @@ class _PesagemPageState extends State<PesagemPage> {
       _lookupOnBlur = false;
       ++_lookupGeneration;
       _foundPlate = null;
+      _consultedUnit = null;
+      _consultedEnvironment = null;
       _trailers = [];
       _ticketSession.current = null;
       _ticketSession.phase = WeighingPhase.nova;
@@ -439,6 +494,7 @@ class _PesagemPageState extends State<PesagemPage> {
       _trailer.clear();
       _ticketSession.operationMode = OperationMode.manual;
       _ticketSession.officialOperation = const {};
+      _ticketSession.preTickets = const [];
       for (final controller in _operationControllers.values) {
         controller.clear();
       }
@@ -727,13 +783,25 @@ class _PesagemPageState extends State<PesagemPage> {
                       color: _foundPlate == null
                           ? AppColors.green
                           : AppColors.muted,
-                      icon: Icon(
-                        _foundPlate == null
-                            ? Icons.search
-                            : Icons.cleaning_services_outlined,
-                      ),
-                      onPressed: () =>
-                          _foundPlate == null ? _lookup() : _clearLookup(),
+                      icon: _lookingUp
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                semanticsLabel: 'Consultando Libra',
+                              ),
+                            )
+                          : Icon(
+                              _foundPlate == null
+                                  ? Icons.search
+                                  : Icons.cleaning_services_outlined,
+                            ),
+                      onPressed: _lookingUp
+                          ? null
+                          : () => _foundPlate == null
+                                ? _lookup()
+                                : _clearLookup(),
                     ),
                   ),
                 ),

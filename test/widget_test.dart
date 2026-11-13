@@ -1,3 +1,5 @@
+import 'package:balanca_desktop/features/pesagem/operation_lookup.dart';
+
 import 'dart:io';
 
 import 'package:balanca_desktop/features/pesagem/manual_capture/capture_dialog.dart';
@@ -65,7 +67,9 @@ void main() {
       tester.view.physicalSize = size;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      await tester.pumpWidget(const BalancaApp());
+      await tester.pumpWidget(
+        const BalancaApp(lookupService: DemoOperationLookupService()),
+      );
       await tester.pumpAndSettle();
       expect(find.byType(PesagemPage), findsOneWidget);
       expect(find.text('Veículos em Operação'), findsOneWidget);
@@ -200,7 +204,9 @@ void main() {
     tester.view.physicalSize = const Size(1920, 1080);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(const BalancaApp());
+    await tester.pumpWidget(
+      const BalancaApp(lookupService: DemoOperationLookupService()),
+    );
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).first, 'ABC1D23');
     await tapAction(tester, 'Nova Pesagem');
@@ -215,7 +221,9 @@ void main() {
     tester.view.physicalSize = const Size(1366, 768);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(const BalancaApp());
+    await tester.pumpWidget(
+      const BalancaApp(lookupService: DemoOperationLookupService()),
+    );
     await tester.pumpAndSettle();
     final plate = find.byType(TextField).first;
     await tester.enterText(plate, 'abc1d23');
@@ -259,7 +267,9 @@ void main() {
     tester.view.physicalSize = const Size(1366, 768);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(const BalancaApp());
+    await tester.pumpWidget(
+      const BalancaApp(lookupService: DemoOperationLookupService()),
+    );
     await tester.pumpAndSettle();
     final plate = find.byType(TextField).first;
     final trailer = find.byType(TextField).at(1);
@@ -307,7 +317,9 @@ void main() {
     tester.view.physicalSize = size;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(const BalancaApp());
+    await tester.pumpWidget(
+      const BalancaApp(lookupService: DemoOperationLookupService()),
+    );
     await tester.pumpAndSettle();
   }
 
@@ -842,6 +854,7 @@ void main() {
                       summary: const WeighingSummary(),
                       manualOperator: 'balanca',
                     ),
+                    onSave: () {},
                   ),
                   child: const Text('Confirmação'),
                 ),

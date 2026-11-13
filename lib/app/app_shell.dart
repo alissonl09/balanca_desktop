@@ -10,13 +10,26 @@ import '../features/configuracoes/configuracoes_page.dart';
 import '../features/configuracoes/settings_models.dart';
 import '../features/pesagem/pesagem_page.dart';
 import '../features/pesagem/pesagem_actions.dart';
+import '../features/pesagem/operation_lookup.dart';
+import '../core/libra/libra_configuration.dart';
+import '../core/libra/libra_settings_store.dart';
+import '../core/offline/offline_models.dart';
 import '../features/relatorios/relatorios_page.dart';
 import '../features/ticket/ticket_session.dart';
 import '../core/permissions/permission_models.dart';
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key, this.station});
+  const AppShell({
+    super.key,
+    this.station,
+    this.lookupService,
+    this.libraStore,
+    this.libraSettings,
+  });
+  final LibraSettingsStore? libraStore;
+  final LibraSettingsData? libraSettings;
   final OfflineStation? station;
+  final OperationLookupService? lookupService;
   @override
   State<AppShell> createState() => _AppShellState();
 }
@@ -26,7 +39,10 @@ enum _AppPage { pesagem, cadastros, relatorios, configuracoes }
 class _AppShellState extends State<AppShell> {
   _AppPage _page = _AppPage.pesagem;
   final _cadastrosMemory = CadastrosMemory.mock();
-  final _settings = SettingsState();
+  late final _settings = SettingsState(
+    libraStore: widget.libraStore,
+    libraSettings: widget.libraSettings,
+  );
   final _ticketSession = TicketSession();
   final _pesagemActions = PesagemActionDispatcher();
   late final _station = widget.station ?? OfflineStation();
@@ -34,6 +50,14 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
+    final configuration = LibraConfiguration();
+    // Estado operacional inicial configurado, sem sincronização automática.
+    if (widget.station == null &&
+        widget.lookupService == null &&
+        !configuration.mock &&
+        !configuration.offline) {
+      _station.setConnection(StationConnection.online);
+    }
     _settings.permissions.addListener(_permissionsChanged);
   }
 
@@ -157,6 +181,7 @@ class _AppShellState extends State<AppShell> {
                                   vertical: size.height >= 1000 ? 18 : 10,
                                 ),
                                 child: PesagemPage(
+                                  lookupService: widget.lookupService,
                                   actionDispatcher: _pesagemActions,
                                   ticketSession: _ticketSession,
                                   station: _station,

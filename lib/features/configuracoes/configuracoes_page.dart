@@ -13,6 +13,7 @@ import '../ticket/ticket_session.dart';
 import 'indicator_settings.dart';
 import 'permissions_settings.dart';
 import 'manual_webcam_settings.dart';
+import 'libra_settings.dart';
 import '../../core/permissions/permission_models.dart';
 import '../access_control/access_control_state.dart';
 
@@ -87,7 +88,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     }
   });
 
-  void _save() {
+  bool _saving = false;
+  Future<void> _save() async {
+    if (_saving) return;
     if (!settings.permissions.allows(_tab.permission)) return;
     if (!settings.gateAssignmentsValid) {
       _message('Entrada e Saída devem usar cancelas diferentes.');
@@ -128,6 +131,21 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       return;
     }
     if (!_form.currentState!.validate()) return;
+    if (_tab == _SettingsTab.general) {
+      setState(() => _saving = true);
+      try {
+        await settings.saveLibraSettings();
+        settings.libra.loadFailed = false;
+        if (mounted) _message('Configuração da Libra salva nesta estação.');
+      } catch (_) {
+        if (mounted) {
+          _message('Não foi possível salvar a configuração local da Libra.');
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+      return;
+    }
     _message(
       'Configurações mantidas somente nesta sessão. Nenhuma integração foi acionada.',
     );
@@ -256,7 +274,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               ),
               const SizedBox(height: 16),
               const Text(
-                'A webcam é salva nesta estação. As demais configurações são de demonstração, mantidas na sessão.',
+                'Webcam e integração Libra podem ser salvas nesta estação. As demais configurações permanecem na sessão.',
                 style: TextStyle(fontSize: 12, color: AppColors.muted),
               ),
               const SizedBox(height: 12),
@@ -264,7 +282,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 alignment: Alignment.centerRight,
                 child: ElevatedButton(
                   key: const ValueKey('save-settings'),
-                  onPressed: settings.permissions.allows(_tab.permission)
+                  onPressed:
+                      !_saving && settings.permissions.allows(_tab.permission)
                       ? _save
                       : null,
                   style: ElevatedButton.styleFrom(
@@ -338,6 +357,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           ],
         ),
       ),
+      const SizedBox(height: 16),
+      LibraSettings(settings: settings),
       const SizedBox(height: 16),
       SettingsSection(
         title: 'Pesagem manual',
