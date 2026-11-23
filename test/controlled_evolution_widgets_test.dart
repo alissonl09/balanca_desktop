@@ -264,8 +264,8 @@ void main() {
       expect(settings.manualWeighingEnabled, isFalse);
       await tap(tester, keyed('settings-tab-vehicles'));
       expect(find.text('Inverter posição Entrada/Saída'), findsNothing);
-      await select(tester, 'entry-barrier', 'Cancela Entrada 01 (simulada)');
-      await select(tester, 'exit-barrier', 'Cancela Saída 01 (simulada)');
+      await select(tester, 'gate-1', 'Cancela Entrada 01 (simulada)');
+      await select(tester, 'gate-2', 'Cancela Saída 01 (simulada)');
       expect(settings.entryBarrierId, 'entrada-01');
       expect(settings.exitBarrierId, 'saida-01');
       expect(settings.accessControl.gate(GateSide.entry), GateState.closed);
@@ -306,10 +306,10 @@ void main() {
     addTearDown(settings.dispose);
     await mount(tester, settings, configuration: true);
     await tap(tester, keyed('settings-tab-vehicles'));
-    await select(tester, 'entry-barrier', 'Cancela Entrada 01 (simulada)');
+    await select(tester, 'gate-1', 'Cancela Entrada 01 (simulada)');
     final exit = tester.widget<DropdownButton<String>>(
       find.descendant(
-        of: keyed('exit-barrier'),
+        of: keyed('gate-2'),
         matching: find.byType(DropdownButton<String>),
       ),
     );
@@ -319,7 +319,7 @@ void main() {
     );
     expect(settings.assignBarrier(GateSide.exit, 'entrada-01'), isFalse);
     expect(settings.exitBarrierId, isNull);
-    await select(tester, 'exit-barrier', 'Cancela Saída 01 (simulada)');
+    await select(tester, 'gate-2', 'Cancela Saída 01 (simulada)');
     expect(settings.gateAssignmentsValid, isTrue);
   });
 
@@ -335,69 +335,156 @@ void main() {
     expect(tester.widget<IconButton>(reverse).onPressed, isNotNull);
   });
 
-  windowsTest('ícone troca equipamentos sem mover os conjuntos visuais', (
-    tester,
-  ) async {
-    final settings = SettingsState()
-      ..integratedSgv = true
-      ..barriers = true
-      ..trafficLight = true;
-    addTearDown(settings.dispose);
-    expect(settings.assignBarrier(GateSide.entry, 'entrada-01'), isTrue);
-    expect(settings.assignBarrier(GateSide.exit, 'saida-01'), isTrue);
-    settings.accessControl.simulateGate(GateSide.entry, GateState.open);
-    await mount(tester, settings, configuration: true);
-    await tap(tester, keyed('settings-tab-vehicles'));
-    final reverse = keyed('reverse-gate-sides');
-    expect(reverse, findsOneWidget);
-    expect(
-      tester.widget<IconButton>(reverse).tooltip,
-      'Inverter posição de Entrada e Saída',
-    );
-    expect(find.text('Inverter posição Entrada/Saída'), findsNothing);
-    await tap(tester, reverse);
-    expect(settings.entryBarrierId, 'saida-01');
-    expect(settings.exitBarrierId, 'entrada-01');
-    final entrySelection = tester.widget<DropdownButton<String>>(
-      find.descendant(
-        of: keyed('entry-barrier'),
-        matching: find.byType(DropdownButton<String>),
-      ),
-    );
-    final exitSelection = tester.widget<DropdownButton<String>>(
-      find.descendant(
-        of: keyed('exit-barrier'),
-        matching: find.byType(DropdownButton<String>),
-      ),
-    );
-    expect(entrySelection.value, 'saida-01');
-    expect(exitSelection.value, 'entrada-01');
+  windowsTest(
+    'inversão troca papéis mantendo campos e equipamentos físicos fixos',
+    (tester) async {
+      final settings = SettingsState()
+        ..integratedSgv = true
+        ..barriers = true
+        ..trafficLight = true;
+      addTearDown(settings.dispose);
+      expect(settings.assignBarrier(GateSide.entry, 'entrada-01'), isTrue);
+      expect(settings.assignBarrier(GateSide.exit, 'saida-01'), isTrue);
+      settings.accessControl.simulateGate(GateSide.entry, GateState.open);
+      await mount(tester, settings, configuration: true);
+      await tap(tester, keyed('settings-tab-vehicles'));
+      final reverse = keyed('reverse-gate-sides');
+      void expectGate(
+        String key,
+        String label,
+        String role,
+        String id,
+        String name,
+      ) {
+        final decoration = tester
+            .widget<InputDecorator>(
+              find.descendant(
+                of: keyed(key),
+                matching: find.byType(InputDecorator),
+              ),
+            )
+            .decoration;
+        expect(decoration.labelText, label);
+        expect(decoration.helperText, role);
+        final selection = tester.widget<DropdownButton<String>>(
+          find.descendant(
+            of: keyed(key),
+            matching: find.byType(DropdownButton<String>),
+          ),
+        );
+        expect(selection.value, id);
+        expect(
+          (selection.items!.singleWhere((item) => item.value == id).child
+                  as Text)
+              .data,
+          name,
+        );
+      }
 
-    await mount(tester, settings);
-    expect(
-      tester.getTopLeft(keyed('lane-entry')).dx,
-      lessThan(tester.getTopLeft(keyed('lane-exit')).dx),
-    );
-    expect(find.text('Cancela Saída 01'), findsOneWidget);
-    expect(find.text('Cancela Entrada 01'), findsOneWidget);
-    final entryLight = tester.getRect(keyed('traffic-light-entry'));
-    final entryGate = tester.getRect(keyed('gate-entry'));
-    final exitLight = tester.getRect(keyed('traffic-light-exit'));
-    final exitGate = tester.getRect(keyed('gate-exit'));
-    expect(entryLight.right, lessThanOrEqualTo(entryGate.left));
-    expect(exitLight.left, greaterThanOrEqualTo(exitGate.right));
-    expect((entryGate.left - entryLight.right).abs(), lessThanOrEqualTo(5));
-    expect((exitLight.left - exitGate.right).abs(), lessThanOrEqualTo(5));
-    final exitMirror = tester.widget<Transform>(
-      find.descendant(of: keyed('gate-exit'), matching: find.byType(Transform)),
-    );
-    expect(exitMirror.transform.entry(0, 0), -1);
-    expect(settings.accessControl.gate(GateSide.entry), GateState.closed);
-    expect(settings.accessControl.gate(GateSide.exit), GateState.open);
-    expect(find.textContaining('Entrada · FECHADA'), findsOneWidget);
-    expect(find.textContaining('Saída · ABERTA'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
+      void expectPhysicalGates(String firstRole, String secondRole) {
+        expect(find.text('Cancela 1'), findsOneWidget);
+        expect(find.text('Cancela 2'), findsOneWidget);
+        expectGate(
+          'gate-1',
+          'Cancela 1',
+          firstRole,
+          'entrada-01',
+          'Cancela Entrada 01 (simulada)',
+        );
+        expectGate(
+          'gate-2',
+          'Cancela 2',
+          secondRole,
+          'saida-01',
+          'Cancela Saída 01 (simulada)',
+        );
+      }
+
+      expectPhysicalGates('Entrada', 'Saída');
+      final firstPosition = tester.getTopLeft(keyed('gate-1'));
+      final secondPosition = tester.getTopLeft(keyed('gate-2'));
+      expect(reverse, findsOneWidget);
+      expect(
+        tester.widget<IconButton>(reverse).tooltip,
+        'Inverter associação de Entrada e Saída',
+      );
+      expect(find.text('Inverter posição Entrada/Saída'), findsNothing);
+      await tap(tester, reverse);
+      expect(settings.entryBarrierId, 'saida-01');
+      expect(settings.exitBarrierId, 'entrada-01');
+      final entrySelection = tester.widget<DropdownButton<String>>(
+        find.descendant(
+          of: keyed('gate-1'),
+          matching: find.byType(DropdownButton<String>),
+        ),
+      );
+      final exitSelection = tester.widget<DropdownButton<String>>(
+        find.descendant(
+          of: keyed('gate-2'),
+          matching: find.byType(DropdownButton<String>),
+        ),
+      );
+      expect(entrySelection.value, 'entrada-01');
+      expect(exitSelection.value, 'saida-01');
+      expectPhysicalGates('Saída', 'Entrada');
+      expect(tester.getTopLeft(keyed('gate-1')), firstPosition);
+      expect(tester.getTopLeft(keyed('gate-2')), secondPosition);
+      await tap(tester, reverse);
+      expectPhysicalGates('Entrada', 'Saída');
+      expect(settings.entryBarrierId, 'entrada-01');
+      expect(settings.exitBarrierId, 'saida-01');
+      await tap(tester, reverse);
+
+      await mount(tester, settings);
+      expect(
+        tester.getTopLeft(keyed('lane-entry')).dx,
+        lessThan(tester.getTopLeft(keyed('lane-exit')).dx),
+      );
+      expect(find.text('Cancela Saída 01'), findsOneWidget);
+      expect(find.text('Cancela Entrada 01'), findsOneWidget);
+      final entryLight = tester.getRect(keyed('traffic-light-entry'));
+      final entryGate = tester.getRect(keyed('gate-entry'));
+      final exitLight = tester.getRect(keyed('traffic-light-exit'));
+      final exitGate = tester.getRect(keyed('gate-exit'));
+      expect(entryLight.right, lessThanOrEqualTo(entryGate.left));
+      expect(exitLight.left, greaterThanOrEqualTo(exitGate.right));
+      expect((entryGate.left - entryLight.right).abs(), lessThanOrEqualTo(5));
+      expect((exitLight.left - exitGate.right).abs(), lessThanOrEqualTo(5));
+      final exitMirror = tester.widget<Transform>(
+        find.descendant(
+          of: keyed('gate-exit'),
+          matching: find.byType(Transform),
+        ),
+      );
+      expect(exitMirror.transform.entry(0, 0), -1);
+      expect(settings.accessControl.gate(GateSide.entry), GateState.closed);
+      expect(settings.accessControl.gate(GateSide.exit), GateState.open);
+      expect(tester.widget<Text>(keyed('access-status-entry')).data, 'FECHADA');
+      expect(tester.widget<Text>(keyed('access-status-exit')).data, 'ABERTA');
+      expect(find.textContaining('Entrada ·'), findsNothing);
+      expect(find.textContaining('Saída ·'), findsNothing);
+      await tap(tester, keyed('access-simulation'));
+      await tap(tester, keyed('simulate-entry-open'));
+      expect(
+        settings.accessControl.gateForEquipment('saida-01'),
+        GateState.open,
+      );
+      expect(
+        settings.accessControl.light(GateSide.entry),
+        TrafficLightState.green,
+      );
+      await tap(tester, keyed('simulate-exit-closed'));
+      expect(
+        settings.accessControl.gateForEquipment('entrada-01'),
+        GateState.closed,
+      );
+      expect(
+        settings.accessControl.light(GateSide.exit),
+        TrafficLightState.red,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   windowsTest(
     'Pesagem mostra IDs selecionados e simula cada equipamento sem trocar papéis',

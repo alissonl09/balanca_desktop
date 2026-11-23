@@ -1,5 +1,12 @@
 import 'package:flutter/material.dart';
 
+import 'dart:convert';
+import 'dart:math';
+
+import '../core/database/database_manager.dart';
+import '../core/offline/sqlite_pesagem_store.dart';
+import '../features/access_control/access_control_state.dart';
+
 import '../core/theme/app_colors.dart';
 import '../core/widgets/visual_components.dart';
 import '../core/widgets/station_connection_indicator.dart';
@@ -25,9 +32,11 @@ class AppShell extends StatefulWidget {
     this.lookupService,
     this.libraStore,
     this.libraSettings,
+    this.database,
   });
   final LibraSettingsStore? libraStore;
   final LibraSettingsData? libraSettings;
+  final DatabaseManager? database;
   final OfflineStation? station;
   final OperationLookupService? lookupService;
   @override
@@ -42,23 +51,71 @@ class _AppShellState extends State<AppShell> {
   late final _settings = SettingsState(
     libraStore: widget.libraStore,
     libraSettings: widget.libraSettings,
+    database: widget.database,
   );
-  final _ticketSession = TicketSession();
+  var _ticketSession = TicketSession();
+  String? _stationLoadError;
   final _pesagemActions = PesagemActionDispatcher();
-  late final _station = widget.station ?? OfflineStation();
+  late final _station =
+      widget.station ??
+      OfflineStation(
+        store: widget.database == null
+            ? null
+            : SqlitePesagemStore(widget.database!),
+        idFactory: widget.database == null
+            ? null
+            : () => base64UrlEncode(
+                List<int>.generate(24, (_) => Random.secure().nextInt(256)),
+              ),
+      );
 
   @override
   void initState() {
     super.initState();
+    widget.database?.isOperationActive = () =>
+        _ticketSession.phase == WeighingPhase.aberta ||
+        _station.weighings.any(
+          (w) =>
+              w.phase == WeighingPhase.aberta ||
+              w.phase == WeighingPhase.ticketPendente,
+        ) ||
+        GateSide.values.any(
+          (side) => _settings.accessControl.gate(side) != GateState.closed,
+        );
+    widget.database?.onRestored = () async {
+      await _station.reload();
+      if (mounted) {
+        setState(() {
+          _ticketSession = TicketSession();
+          _stationLoadError = null;
+        });
+      }
+    };
     final configuration = LibraConfiguration();
     // Estado operacional inicial configurado, sem sincronização automática.
     if (widget.station == null &&
-        widget.lookupService == null &&
-        !configuration.mock &&
-        !configuration.offline) {
-      _station.setConnection(StationConnection.online);
+        (widget.database == null || widget.database!.available)) {
+      _initializeStation(configuration);
     }
     _settings.permissions.addListener(_permissionsChanged);
+  }
+
+  Future<void> _initializeStation(LibraConfiguration configuration) async {
+    try {
+      // Carrega a outbox mesmo ao iniciar offline; não depende de login/rede.
+      await _station.load();
+      if (widget.lookupService == null &&
+          !configuration.mock &&
+          !configuration.offline) {
+        await _station.setConnection(StationConnection.online);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _stationLoadError = 'Não foi possível carregar as pesagens locais. Acesse Configurações > Banco de Dados para diagnóstico.',
+        );
+      }
+    }
   }
 
   void _permissionsChanged() {
@@ -67,6 +124,8 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    widget.database?.isOperationActive = null;
+    widget.database?.onRestored = null;
     _cadastrosMemory.dispose();
     _settings.permissions.removeListener(_permissionsChanged);
     _settings.dispose();
@@ -180,13 +239,22 @@ class _AppShellState extends State<AppShell> {
                                       : 12,
                                   vertical: size.height >= 1000 ? 18 : 10,
                                 ),
-                                child: PesagemPage(
-                                  lookupService: widget.lookupService,
-                                  actionDispatcher: _pesagemActions,
-                                  ticketSession: _ticketSession,
-                                  station: _station,
-                                  settings: _settings,
-                                ),
+                                child:
+                                    (widget.database != null &&
+                                            !widget.database!.available) ||
+                                        _stationLoadError != null
+                                    ? Center(
+                                        child: Text(
+                                          _stationLoadError ?? 'Banco local indisponível. Acesse Configurações > Banco de Dados para diagnóstico.',
+                                        ),
+                                      )
+                                    : PesagemPage(
+                                        lookupService: widget.lookupService,
+                                        actionDispatcher: _pesagemActions,
+                                        ticketSession: _ticketSession,
+                                        station: _station,
+                                        settings: _settings,
+                                      ),
                               ),
                       ),
                     ),

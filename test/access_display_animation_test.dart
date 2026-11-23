@@ -1,8 +1,51 @@
 import 'package:balanca_desktop/features/access_control/access_control_panel.dart';
+import 'package:balanca_desktop/features/access_control/access_control_state.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final entry in {
+    GateState.closed: 'FECHADA',
+    GateState.open: 'ABERTA',
+    GateState.moving: 'EM MOVIMENTO',
+    GateState.error: 'ERRO',
+  }.entries) {
+    testWidgets('cancelas exibem somente o estado ${entry.value}', (
+      tester,
+    ) async {
+      final state = AccessControlState()
+        ..bindEquipments('entrada-01', 'saida-01');
+      addTearDown(state.dispose);
+      for (final side in GateSide.values) {
+        state.simulateGate(side, entry.key);
+      }
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 320,
+              child: AccessControlPanel(
+                state: state,
+                gates: true,
+                trafficLights: true,
+                display: false,
+                entryEquipmentId: 'entrada-01',
+                exitEquipmentId: 'saida-01',
+                equipmentSource: const MockGateEquipmentSource(),
+                displayMessage: '',
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(find.text(entry.value), findsNWidgets(2));
+      expect(find.textContaining('Entrada ·'), findsNothing);
+      expect(find.textContaining('Saída ·'), findsNothing);
+      expect(find.text('Cancela Entrada 01'), findsOneWidget);
+      expect(find.text('Cancela Saída 01'), findsOneWidget);
+    });
+  }
+
   test('normalização preserva somente caracteres do painel digital', () {
     expect(sanitizeDisplayText('COOXUPÉ'), 'COOXUPE');
     expect(sanitizeDisplayText('BALANÇA'), 'BALANCA');

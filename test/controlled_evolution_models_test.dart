@@ -367,19 +367,56 @@ void main() {
     );
   });
 
-  test('inversão troca IDs e preserva estados por equipamento', () {
-    final settings = SettingsState();
+  test(
+    'inversão troca papéis e preserva slots físicos e estados por equipamento',
+    () {
+      final settings = SettingsState();
+      addTearDown(settings.dispose);
+      expect(settings.assignBarrier(GateSide.entry, 'entrada-01'), isTrue);
+      expect(settings.assignBarrier(GateSide.exit, 'saida-01'), isTrue);
+      expect(settings.gateId(GateSlot.one), 'entrada-01');
+      expect(settings.gateId(GateSlot.two), 'saida-01');
+      expect(settings.gateSide(GateSlot.one), GateSide.entry);
+      expect(settings.gateSide(GateSlot.two), GateSide.exit);
+      settings.accessControl.simulateGate(GateSide.entry, GateState.open);
+      expect(settings.swapBarriers(), isFalse);
+      expect(settings.entryBarrierId, 'entrada-01');
+      settings.barriers = true;
+      expect(settings.swapBarriers(), isTrue);
+      expect(settings.entryBarrierId, 'saida-01');
+      expect(settings.exitBarrierId, 'entrada-01');
+      expect(settings.gateId(GateSlot.one), 'entrada-01');
+      expect(settings.gateId(GateSlot.two), 'saida-01');
+      expect(settings.gateSide(GateSlot.one), GateSide.exit);
+      expect(settings.gateSide(GateSlot.two), GateSide.entry);
+      expect(settings.accessControl.gate(GateSide.entry), GateState.closed);
+      expect(settings.accessControl.gate(GateSide.exit), GateState.open);
+      expect(settings.swapBarriers(), isTrue);
+      expect(settings.entryBarrierId, 'entrada-01');
+      expect(settings.exitBarrierId, 'saida-01');
+      expect(settings.gateSide(GateSlot.one), GateSide.entry);
+      expect(settings.gateSide(GateSlot.two), GateSide.exit);
+      expect(settings.accessControl.gate(GateSide.entry), GateState.open);
+      expect(settings.accessControl.gate(GateSide.exit), GateState.closed);
+    },
+  );
+
+  test('seleção física após inverter atualiza apenas o papel associado', () {
+    final settings = SettingsState()..barriers = true;
     addTearDown(settings.dispose);
-    expect(settings.assignBarrier(GateSide.entry, 'entrada-01'), isTrue);
-    expect(settings.assignBarrier(GateSide.exit, 'saida-01'), isTrue);
-    settings.accessControl.simulateGate(GateSide.entry, GateState.open);
-    expect(settings.swapBarriers(), isFalse);
-    expect(settings.entryBarrierId, 'entrada-01');
-    settings.barriers = true;
     expect(settings.swapBarriers(), isTrue);
-    expect(settings.entryBarrierId, 'saida-01');
-    expect(settings.exitBarrierId, 'entrada-01');
-    expect(settings.accessControl.gate(GateSide.entry), GateState.closed);
-    expect(settings.accessControl.gate(GateSide.exit), GateState.open);
+    expect(settings.assignGate(GateSlot.one, 'apoio-01'), isTrue);
+    expect(settings.assignGate(GateSlot.two, 'balanca-01'), isTrue);
+    expect(settings.exitBarrierId, 'apoio-01');
+    expect(settings.entryBarrierId, 'balanca-01');
+    expect(settings.assignGate(GateSlot.two, 'apoio-01'), isFalse);
+    expect(settings.assignGate(GateSlot.one, 'inexistente'), isFalse);
+    expect(settings.assignBarrier(GateSide.entry, 'saida-01'), isTrue);
+    expect(settings.gateId(GateSlot.two), 'saida-01');
+    expect(settings.gateId(GateSlot.one), 'apoio-01');
+    expect(settings.accessControl.equipmentId(GateSide.entry), 'saida-01');
+    expect(settings.assignGate(GateSlot.one, null), isTrue);
+    expect(settings.exitBarrierId, isNull);
+    expect(settings.gateAssignmentsValid, isTrue);
   });
 }

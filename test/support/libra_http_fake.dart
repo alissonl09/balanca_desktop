@@ -16,6 +16,9 @@ class TestHeaders implements HttpHeaders {
 class TestRequest implements HttpClientRequest {
   TestRequest(this.result);
   final Future<HttpClientResponse> Function() result;
+  final bytes = <int>[];
+  @override
+  void add(List<int> data) => bytes.addAll(data);
   @override
   final TestHeaders headers = TestHeaders();
   @override
@@ -57,9 +60,18 @@ class TestClient implements HttpClient {
        );
   final TestRequest request;
   Uri? uri;
+  String? method;
   bool closed = false;
   @override
   Future<HttpClientRequest> getUrl(Uri url) async {
+    method = 'GET';
+    uri = url;
+    return request;
+  }
+
+  @override
+  Future<HttpClientRequest> postUrl(Uri url) async {
+    method = 'POST';
     uri = url;
     return request;
   }

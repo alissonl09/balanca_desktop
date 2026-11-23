@@ -35,7 +35,7 @@ class PesagemActionDispatcher {
 
 /// Envolve o shell inteiro enquanto Pesagem está ativa, inclusive cabeçalho/menu.
 /// Em uso isolado, a própria página instala este mesmo escopo.
-class PesagemActionScope extends StatelessWidget {
+class PesagemActionScope extends StatefulWidget {
   const PesagemActionScope({
     super.key,
     required this.dispatcher,
@@ -48,7 +48,50 @@ class PesagemActionScope extends StatelessWidget {
   final bool enabled;
 
   @override
-  Widget build(BuildContext context) => enabled
+  State<PesagemActionScope> createState() => _PesagemActionScopeState();
+}
+
+class _PesagemActionScopeState extends State<PesagemActionScope> {
+  final _focus = FocusScopeNode(debugLabel: 'Atalhos da pesagem');
+  ModalRoute<dynamic>? _route;
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addListener(_restoreScopeFocus);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
+  }
+
+  void _restoreScopeFocus() {
+    if (!mounted ||
+        !widget.enabled ||
+        _route?.isCurrent != true ||
+        _focus.context == null ||
+        _focus.hasFocus) {
+      return;
+    }
+    final primary = FocusManager.instance.primaryFocus;
+    // Ao desfocar ou fechar um diálogo, o Navigator pode focar a própria rota.
+    // Recupera somente esse caso; nunca tira foco de outro controle ou modal.
+    if (primary != null && _focus.ancestors.contains(primary)) {
+      _focus.requestFocus();
+    }
+  }
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeListener(_restoreScopeFocus);
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.enabled
       ? Shortcuts(
           shortcuts: {
             for (final action in PesagemAction.values)
@@ -60,13 +103,19 @@ class PesagemActionScope extends StatelessWidget {
             actions: {
               PesagemActionIntent: CallbackAction<PesagemActionIntent>(
                 onInvoke: (intent) {
-                  dispatcher.invoke(intent.action);
+                  widget.dispatcher.invoke(intent.action);
                   return null;
                 },
               ),
             },
-            child: child,
+            // Ao desfocar um campo, o foco permanece abaixo de Shortcuts/Actions.
+            // Sem este escopo, ele volta para a rota e deixa de alcançar F5–F12.
+            child: FocusScope(
+              node: _focus,
+              autofocus: true,
+              child: widget.child,
+            ),
           ),
         )
-      : child;
+      : widget.child;
 }

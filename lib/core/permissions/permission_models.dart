@@ -24,6 +24,9 @@ enum AppPermission {
   indicators('Configurações', 'Indicadores'),
   indicatorModels('Configurações', 'Modelos de Indicadores'),
   permissions('Configurações', 'Permissões'),
+  maintainDatabase('Banco de Dados', 'Manutenção do banco local'),
+  executeDatabaseDdl('Banco de Dados', 'Executar DDL administrativo'),
+  restoreDatabase('Banco de Dados', 'Restaurar backup'),
   readUsers('Usuários', 'Consultar usuários'),
   assignProfile('Usuários', 'Atribuir perfil'),
   manageProfiles('Usuários', 'Administrar perfis');

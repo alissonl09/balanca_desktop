@@ -170,10 +170,18 @@ class AccessControlPanel extends StatelessWidget {
             TrafficLightVisual(state: state.light(side), side: side),
         ],
       ),
-      Text(
-        '${side == GateSide.entry ? 'Entrada' : 'Saída'}${gates ? ' · ${_label(state.gate(side))}' : ''}',
-        textAlign: TextAlign.center,
-        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+      Semantics(
+        label:
+            '${side == GateSide.entry ? 'Entrada' : 'Saída'}${gates ? ': ${_label(state.gate(side))}' : ''}',
+        excludeSemantics: true,
+        child: Text(
+          gates
+              ? _label(state.gate(side))
+              : (side == GateSide.entry ? 'Entrada' : 'Saída'),
+          key: ValueKey('access-status-${side.name}'),
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+        ),
       ),
       if (gates)
         Text(

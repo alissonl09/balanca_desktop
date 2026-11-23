@@ -14,6 +14,7 @@ import 'indicator_settings.dart';
 import 'permissions_settings.dart';
 import 'manual_webcam_settings.dart';
 import 'libra_settings.dart';
+import 'database_settings.dart';
 import '../../core/permissions/permission_models.dart';
 import '../access_control/access_control_state.dart';
 
@@ -23,7 +24,8 @@ enum _SettingsTab {
   printing('Impressão'),
   indicators('Indicadores de Peso'),
   models('Modelos de Indicadores'),
-  permissions('Permissões');
+  permissions('Permissões'),
+  database('Banco de Dados');
 
   const _SettingsTab(this.label);
   final String label;
@@ -34,6 +36,7 @@ enum _SettingsTab {
     indicators => AppPermission.indicators,
     models => AppPermission.indicatorModels,
     permissions => AppPermission.permissions,
+    database => AppPermission.maintainDatabase,
   };
 }
 
@@ -92,6 +95,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   Future<void> _save() async {
     if (_saving) return;
     if (!settings.permissions.allows(_tab.permission)) return;
+    if (_tab == _SettingsTab.database) {
+      _message('As ações de manutenção são aplicadas individualmente.');
+      return;
+    }
     if (!settings.gateAssignmentsValid) {
       _message('Entrada e Saída devem usar cancelas diferentes.');
       return;
@@ -269,6 +276,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                           _SettingsTab.permissions => PermissionsSettings(
                             permissions: settings.permissions,
                           ),
+                          _SettingsTab.database => DatabaseSettings(
+                            database: settings.database,
+                            permissions: settings.permissions,
+                          ),
                         },
                 ),
               ),
@@ -413,7 +424,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 ),
                 IconButton(
                   key: const ValueKey('reverse-gate-sides'),
-                  tooltip: 'Inverter posição de Entrada e Saída',
+                  tooltip: 'Inverter associação de Entrada e Saída',
                   icon: const Icon(Icons.autorenew_rounded),
                   color: AppColors.green,
                   visualDensity: VisualDensity.compact,
@@ -426,18 +437,20 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               SettingsFields(
                 children: [
                   _barrier(
-                    'entry-barrier',
-                    'Cancela de Entrada',
-                    settings.entryBarrierId,
-                    settings.exitBarrierId,
-                    (value) => _assignBarrier(GateSide.entry, value),
+                    'gate-1',
+                    'Cancela 1',
+                    settings.gateSide(GateSlot.one),
+                    settings.gateId(GateSlot.one),
+                    settings.gateId(GateSlot.two),
+                    (value) => _assignGate(GateSlot.one, value),
                   ),
                   _barrier(
-                    'exit-barrier',
-                    'Cancela de Saída',
-                    settings.exitBarrierId,
-                    settings.entryBarrierId,
-                    (value) => _assignBarrier(GateSide.exit, value),
+                    'gate-2',
+                    'Cancela 2',
+                    settings.gateSide(GateSlot.two),
+                    settings.gateId(GateSlot.two),
+                    settings.gateId(GateSlot.one),
+                    (value) => _assignGate(GateSlot.two, value),
                   ),
                 ],
               ),
@@ -574,6 +587,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   Widget _barrier(
     String key,
     String label,
+    GateSide side,
     String? value,
     String? otherId,
     ValueChanged<String?> onChanged,
@@ -581,7 +595,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     key: ValueKey(key),
     initialValue: value,
     isExpanded: true,
-    decoration: InputDecoration(labelText: label),
+    decoration: InputDecoration(
+      labelText: label,
+      helperText: side == GateSide.entry ? 'Entrada' : 'Saída',
+    ),
     items: [
       for (final barrier in settings.gateEquipmentSource.available)
         DropdownMenuItem(
@@ -593,8 +610,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     onChanged: onChanged,
   );
 
-  void _assignBarrier(GateSide side, String? id) {
-    if (!settings.assignBarrier(side, id)) {
+  void _assignGate(GateSlot slot, String? id) {
+    if (!settings.assignGate(slot, id)) {
       _message('Entrada e Saída devem usar cancelas diferentes.');
       setState(() {});
     }

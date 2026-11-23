@@ -10,6 +10,32 @@ import 'package:balanca_desktop/features/pesagem/pesagem_side_panel.dart';
 import 'package:balanca_desktop/features/pesagem/pesagem_action_bar.dart';
 
 void main() {
+  for (final action in PesagemAction.values) {
+    testWidgets('${action.shortcut} funciona após remover foco do campo', (
+      tester,
+    ) async {
+      final dispatcher = PesagemActionDispatcher();
+      final calls = <PesagemAction>[];
+      dispatcher.bind((a) async => calls.add(a));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PesagemActionScope(
+            dispatcher: dispatcher,
+            child: const Scaffold(body: TextField(autofocus: true)),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      FocusManager.instance.primaryFocus!.unfocus(
+        disposition: UnfocusDisposition.scope,
+      );
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(action.key!);
+      await tester.pumpAndSettle();
+      expect(calls, [action]);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+  }
+
   for (final trailer in <String?>[null, '', '   ', 'ABC1D23']) {
     testWidgets('lista mostra carreta opcional: ${trailer ?? 'null'}', (
       tester,

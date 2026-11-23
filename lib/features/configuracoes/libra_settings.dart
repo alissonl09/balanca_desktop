@@ -6,6 +6,7 @@ import '../pesagem/pre_ticket_service.dart';
 import '../pesagem/operation_preview.dart';
 import 'settings_models.dart';
 import 'settings_widgets.dart';
+import 'libra_auth_settings.dart';
 
 class LibraSettings extends StatefulWidget {
   const LibraSettings({
@@ -235,6 +236,16 @@ class _LibraSettingsState extends State<LibraSettings> {
                     key: const ValueKey('libra-connection-status'),
                   ),
                 ),
+              const SizedBox(height: 16),
+              LibraAuthSettings(
+                settings: settings,
+                baseUrl: _configuration.baseUrl(
+                  environment,
+                  local: settings.libra,
+                ),
+                connectionDisabled:
+                    _configuration.mock || _configuration.offline,
+              ),
             ],
           ),
         ),

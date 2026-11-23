@@ -193,11 +193,11 @@ void main() {
       await tap(tester, key('sgv-integration'));
       expect(key('settings-tab-vehicles'), findsOneWidget);
       await tap(tester, key('settings-tab-vehicles'));
-      expect(key('entry-barrier'), findsNothing);
+      expect(key('gate-1'), findsNothing);
       expect(key('ocr-address'), findsNothing);
       await tap(tester, key('barriers-enabled'));
-      await dropdown(tester, 'entry-barrier', 'Cancela Entrada 01 (simulada)');
-      await dropdown(tester, 'exit-barrier', 'Cancela Saída 01 (simulada)');
+      await dropdown(tester, 'gate-1', 'Cancela Entrada 01 (simulada)');
+      await dropdown(tester, 'gate-2', 'Cancela Saída 01 (simulada)');
       await tap(tester, toggle('Semáforo'));
       await tap(tester, toggle('Display de Informações'));
       await tap(tester, toggle('Serviço de Voz'));
@@ -207,7 +207,7 @@ void main() {
       expect(state(tester).informationDisplay, isTrue);
       expect(state(tester).voice, isTrue);
       await tap(tester, key('barriers-enabled'));
-      expect(key('entry-barrier'), findsNothing);
+      expect(key('gate-1'), findsNothing);
       await tap(tester, key('settings-tab-general'));
       await tap(tester, key('sgv-integration'));
       expect(key('settings-tab-vehicles'), findsNothing);

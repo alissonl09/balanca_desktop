@@ -39,6 +39,11 @@ dependencies:
   camera_windows: ^0.3.0+1
   image: ^4.12.0
   path_provider_windows: ^2.3.0
+  sqlite3: 3.9.2
+  file_selector: 1.1.0
+  crypto: 3.0.7
+  path: 1.9.1
+  ffi: 2.2.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -4,6 +4,46 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+enum LibraAuthFailure {
+  configuration,
+  invalidRequest,
+  rejected,
+  forbidden,
+  rateLimited,
+  gateway,
+  unavailable,
+  timeout,
+  network,
+  certificate,
+  invalidResponse,
+}
+
+class LibraAuthException implements Exception {
+  const LibraAuthException(this.failure);
+  final LibraAuthFailure failure;
+  String get message => switch (failure) {
+    LibraAuthFailure.configuration =>
+      'Informe uma URL HTTPS válida, usuário e senha de integração.',
+    LibraAuthFailure.invalidRequest =>
+      'Revise os dados de autenticação informados.',
+    LibraAuthFailure.rejected =>
+      'Autenticação recusada. Revise as credenciais.',
+    LibraAuthFailure.forbidden => 'Usuário sem permissão para acessar a Libra.',
+    LibraAuthFailure.rateLimited =>
+      'Limite de tentativas atingido. Aguarde antes de tentar novamente.',
+    LibraAuthFailure.gateway => 'Não foi possível concluir a autenticação. Verifique as credenciais e contate o suporte se persistir.',
+    LibraAuthFailure.unavailable => 'Serviço de autenticação indisponível.',
+    LibraAuthFailure.timeout => 'A autenticação excedeu o tempo limite.',
+    LibraAuthFailure.network => 'Não foi possível comunicar com a Libra.',
+    LibraAuthFailure.certificate =>
+      'Não foi possível validar o certificado HTTPS da Libra.',
+    LibraAuthFailure.invalidResponse =>
+      'A Libra retornou uma resposta de autenticação inválida.',
+  };
+  @override
+  String toString() => message;
+}
+
 enum LibraFailure {
   configuration,
   authentication,
@@ -50,6 +90,64 @@ class LibraApiClient {
   final Duration timeout;
   final HttpClient Function() _clientFactory;
   final void Function(String)? _log;
+
+  /// Login isolado: sem Bearer, redirecionamento, repetição ou logs de conteúdo.
+  Future<Object?> authenticate({
+    required Uri baseUrl,
+    required String username,
+    required String password,
+  }) async {
+    if (baseUrl.scheme != 'https' ||
+        baseUrl.host.isEmpty ||
+        baseUrl.userInfo.isNotEmpty ||
+        baseUrl.hasQuery ||
+        baseUrl.hasFragment ||
+        (baseUrl.path.isNotEmpty && baseUrl.path != '/') ||
+        username.trim().isEmpty ||
+        password.isEmpty) {
+      throw const LibraAuthException(LibraAuthFailure.configuration);
+    }
+    final client = _clientFactory();
+    try {
+      return await (() async {
+        final request = await client.postUrl(baseUrl.resolve('/api/v1/auth'));
+        request.followRedirects = false;
+        request.headers.set(
+          HttpHeaders.contentTypeHeader,
+          'application/json; charset=utf-8',
+        );
+        request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+        request.add(
+          utf8.encode(
+            jsonEncode({'username': username.trim(), 'password': password}),
+          ),
+        );
+        final response = await request.close();
+        if (response.statusCode != 200) {
+          throw LibraAuthException(switch (response.statusCode) {
+            400 => LibraAuthFailure.invalidRequest,
+            401 => LibraAuthFailure.rejected,
+            403 => LibraAuthFailure.forbidden,
+            429 => LibraAuthFailure.rateLimited,
+            502 => LibraAuthFailure.gateway,
+            503 => LibraAuthFailure.unavailable,
+            _ => LibraAuthFailure.invalidResponse,
+          });
+        }
+        return jsonDecode(await utf8.decoder.bind(response).join());
+      })().timeout(timeout);
+    } on TimeoutException {
+      throw const LibraAuthException(LibraAuthFailure.timeout);
+    } on HandshakeException {
+      throw const LibraAuthException(LibraAuthFailure.certificate);
+    } on FormatException {
+      throw const LibraAuthException(LibraAuthFailure.invalidResponse);
+    } on IOException {
+      throw const LibraAuthException(LibraAuthFailure.network);
+    } finally {
+      client.close(force: true);
+    }
+  }
 
   Future<Object?> getPreTickets({
     required Uri baseUrl,

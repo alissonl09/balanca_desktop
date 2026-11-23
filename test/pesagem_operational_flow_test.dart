@@ -411,19 +411,25 @@ void main() {
         };
         for (final focusedField in [
           null,
+          'sem foco',
           'Placa',
           'Carreta',
           'Motorista',
           'Observação',
         ]) {
-          if (focusedField != null) {
+          if (focusedField == 'sem foco') {
+            FocusManager.instance.primaryFocus!.unfocus();
+            await tester.pumpAndSettle();
+            await tester.sendKeyEvent(a.key!);
+            await tester.pumpAndSettle();
+          } else if (focusedField != null) {
             await tester.tap(input(focusedField));
             await tester.sendKeyEvent(a.key!);
             await tester.pumpAndSettle();
           } else {
             await tap(tester, action(a));
           }
-          expect(result(), findsOneWidget);
+          expect(result(), findsOneWidget, reason: '$focusedField');
           for (final other in PesagemAction.values) {
             await tester.sendKeyEvent(other.key!);
           }
@@ -457,6 +463,7 @@ void main() {
     await render(tester);
     for (final focusedField in [
       null,
+      'sem foco',
       'Placa',
       'Carreta',
       'Motorista',
@@ -464,7 +471,11 @@ void main() {
     ]) {
       await lookupPlate(tester, 'ZZZ9Z99');
       await tester.enterText(input('Motorista'), 'JOAO');
-      if (focusedField != null) {
+      if (focusedField == 'sem foco') {
+        FocusManager.instance.primaryFocus!.unfocus();
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.f6);
+      } else if (focusedField != null) {
         await tester.tap(input(focusedField));
         await tester.sendKeyEvent(LogicalKeyboardKey.f6);
       } else {
@@ -524,6 +535,7 @@ void main() {
       var expectedCalls = 0;
       for (final focusedField in [
         null,
+        'sem foco',
         'Placa',
         'Carreta',
         'Motorista',
@@ -534,7 +546,12 @@ void main() {
         if (focusedField == null) {
           await tap(tester, action(PesagemAction.salvar));
         } else {
-          await tester.tap(input(focusedField));
+          if (focusedField == 'sem foco') {
+            FocusManager.instance.primaryFocus!.unfocus();
+            await tester.pumpAndSettle();
+          } else {
+            await tester.tap(input(focusedField));
+          }
           await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
           await tester.pumpAndSettle();
           // O auto-repeat após terminar o save também não pode salvar de novo.

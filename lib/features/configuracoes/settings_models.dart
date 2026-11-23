@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 
 import '../../core/libra/libra_settings_store.dart';
+import '../../core/libra/libra_auth_session.dart';
+import '../../core/database/database_manager.dart';
 
 import '../../core/indicators/indicator_models.dart';
 import '../../core/indicators/indicator_driver.dart';
@@ -51,6 +53,9 @@ enum PaperOrientation {
 
 enum TicketLogo { standard, demonstration }
 
+/// Posições fixas dos dispositivos na configuração, independentes do papel.
+enum GateSlot { one, two }
+
 class PaperSettings {
   PaperSettings({
     required this.size,
@@ -98,11 +103,14 @@ class SettingsState extends ChangeNotifier {
     ManualCaptureServices? manualCapture,
     LibraSettingsStore? libraStore,
     LibraSettingsData? libraSettings,
+    LibraAuthSession? libraAuth,
+    this.database,
   }) : gateEquipmentSource =
            gateEquipmentSource ?? const MockGateEquipmentSource(),
        manualCapture = manualCapture ?? ManualCaptureServices.current,
        libraStore = libraStore ?? MemoryLibraSettingsStore(),
-       libra = libraSettings ?? LibraSettingsData() {
+       libra = libraSettings ?? LibraSettingsData(),
+       libraAuth = libraAuth ?? LibraAuthSession() {
     environment = StationEnvironment.values.firstWhere(
       (e) => e.name == libra.selectedEnvironment,
       orElse: () => StationEnvironment.homologacao,
@@ -110,6 +118,8 @@ class SettingsState extends ChangeNotifier {
   }
   final LibraSettingsStore libraStore;
   final LibraSettingsData libra;
+  final LibraAuthSession libraAuth;
+  final DatabaseManager? database;
   Future<void> saveLibraSettings() {
     libra.selectedEnvironment = environment.name;
     return libraStore.save(libra);
@@ -133,26 +143,37 @@ class SettingsState extends ChangeNotifier {
       informationDisplay = false,
       ocr = false,
       voice = false;
-  String? entryBarrierId, exitBarrierId;
+  String? _gate1Id, _gate2Id;
+  bool _gatesReversed = false;
+  String? gateId(GateSlot slot) => slot == GateSlot.one ? _gate1Id : _gate2Id;
+  GateSide gateSide(GateSlot slot) =>
+      (slot == GateSlot.one) != _gatesReversed ? GateSide.entry : GateSide.exit;
+  String? get entryBarrierId => _gatesReversed ? _gate2Id : _gate1Id;
+  String? get exitBarrierId => _gatesReversed ? _gate1Id : _gate2Id;
   bool get gateAssignmentsValid =>
       entryBarrierId == null ||
       exitBarrierId == null ||
       entryBarrierId != exitBarrierId;
   bool assignBarrier(GateSide side, String? id) {
+    final slot = gateSide(GateSlot.one) == side ? GateSlot.one : GateSlot.two;
+    return assignGate(slot, id);
+  }
+
+  bool assignGate(GateSlot slot, String? id) {
     if (id != null && !gateEquipmentSource.available.any((e) => e.id == id)) {
       return false;
     }
     if (id != null &&
-        id == (side == GateSide.entry ? exitBarrierId : entryBarrierId)) {
+        id == gateId(slot == GateSlot.one ? GateSlot.two : GateSlot.one)) {
       return false;
     }
     update(() {
-      if (side == GateSide.entry) {
-        entryBarrierId = id;
+      if (slot == GateSlot.one) {
+        _gate1Id = id;
       } else {
-        exitBarrierId = id;
+        _gate2Id = id;
       }
-      accessControl.bindEquipment(side, id);
+      accessControl.bindEquipments(entryBarrierId, exitBarrierId);
     });
     return true;
   }
@@ -160,9 +181,7 @@ class SettingsState extends ChangeNotifier {
   bool swapBarriers() {
     if (!barriers) return false;
     update(() {
-      final previousEntry = entryBarrierId;
-      entryBarrierId = exitBarrierId;
-      exitBarrierId = previousEntry;
+      _gatesReversed = !_gatesReversed;
       accessControl.bindEquipments(entryBarrierId, exitBarrierId);
     });
     return true;
@@ -182,12 +201,19 @@ class SettingsState extends ChangeNotifier {
   final printing = PrintSettings();
 
   void update(VoidCallback change) {
+    final previousEnvironment = environment;
+    final previousUrl = libra.environments[environment.name]?.baseUrl;
     change();
+    if (previousEnvironment != environment ||
+        previousUrl != libra.environments[environment.name]?.baseUrl) {
+      libraAuth.clear();
+    }
     notifyListeners();
   }
 
   @override
   void dispose() {
+    libraAuth.clear();
     indicators.dispose();
     indicatorState.dispose();
     permissions.dispose();

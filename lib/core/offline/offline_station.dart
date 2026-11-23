@@ -130,6 +130,17 @@ class OfflineStation extends ChangeNotifier {
     notifyListeners();
   });
 
+  /// Após restauração administrativa, descarta projeções antigas da memória.
+  Future<void> reload() => _command(() async {
+    final restored = await _store.loadAll();
+    _items
+      ..clear()
+      ..addEntries(restored.map((w) => MapEntry(w.idLocal, w)));
+    _activeId = null;
+    _batch = {};
+    notifyListeners();
+  });
+
   Future<void> selectWeighing(String? id) => _command(() async {
     if (id != null) {
       _get(id);
