@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'toledo_continuous.dart';
+
 enum IndicatorConnectionType {
   tcp('TCP/IP'),
   serial('Serial RS232');
@@ -9,16 +11,28 @@ enum IndicatorConnectionType {
 }
 
 enum IndicatorConnectionStatus {
-  disconnected,
-  connecting,
-  connected,
-  noCommunication,
-  error,
+  disabled('Desativado'),
+  disconnected('Indicador desconectado'),
+  connecting('Conectando'),
+  awaitingData('Aguardando dados'),
+  connected('Comunicando'),
+  noCommunication('Sem comunicação'),
+  error('Erro');
+
+  const IndicatorConnectionStatus(this.label);
+  final String label;
 }
 
-enum SerialParity { none, even, odd }
+enum IndicatorMode {
+  simulated('Simulado'),
+  real('Real');
 
-enum SerialFlowControl { none, xonXoff }
+  const IndicatorMode(this.label);
+  final String label;
+}
+
+const toledoContinuousProtocol = 'MT Continuous / Continuous Output';
+const toledoSerialModels = {'IND560', 'IND570'};
 
 class SerialCapabilities {
   const SerialCapabilities({
@@ -68,9 +82,67 @@ class IndicatorModel {
     if (tcp != null) IndicatorConnectionType.tcp,
     if (serial != null) IndicatorConnectionType.serial,
   ];
+
+  Map<String, Object?> toJson() => {
+    'code': code,
+    'manufacturer': manufacturer,
+    'model': model,
+    'description': description,
+    'active': active,
+    'notes': notes,
+    'protocols': protocols,
+    if (serial case final value?)
+      'serial': {
+        'baudRates': value.baudRates,
+        'dataBits': value.dataBits,
+        'parities': value.parities,
+        'flowControls': value.flowControls,
+        'stopBits': value.stopBits,
+        'interfacesByChannel': value.interfacesByChannel,
+      },
+    if (tcp case final value?)
+      'tcp': {
+        'dhcp': value.dhcp,
+        'primaryPortReference': value.primaryPortReference,
+      },
+  };
+
+  factory IndicatorModel.fromJson(Map<String, dynamic> json) {
+    final serial = json['serial'] as Map<String, dynamic>?;
+    final tcp = json['tcp'] as Map<String, dynamic>?;
+    return IndicatorModel(
+      code: json['code'] as String,
+      manufacturer: json['manufacturer'] as String,
+      model: json['model'] as String,
+      description: json['description'] as String,
+      active: json['active'] as bool,
+      notes: json['notes'] as String,
+      protocols: List<String>.from(json['protocols'] as List),
+      serial: serial == null
+          ? null
+          : SerialCapabilities(
+              baudRates: List<int>.from(serial['baudRates'] as List),
+              dataBits: List<int>.from(serial['dataBits'] as List),
+              parities: List<String>.from(serial['parities'] as List),
+              flowControls: List<String>.from(serial['flowControls'] as List),
+              stopBits: List<int>.from(serial['stopBits'] as List),
+              interfacesByChannel:
+                  (serial['interfacesByChannel'] as Map<String, dynamic>).map(
+                    (key, value) =>
+                        MapEntry(key, List<String>.from(value as List)),
+                  ),
+            ),
+      tcp: tcp == null
+          ? null
+          : TcpCapabilities(
+              dhcp: tcp['dhcp'] as bool,
+              primaryPortReference: tcp['primaryPortReference'] as int?,
+            ),
+    );
+  }
 }
 
-/// Instalação física em memória. Valores desconhecidos continuam nulos.
+/// Parâmetros da instalação física. Valores desconhecidos continuam nulos.
 class IndicatorInstallation {
   IndicatorInstallation({
     required this.id,
@@ -90,13 +162,39 @@ class IndicatorInstallation {
       physicalInterface,
       parity,
       flowControl;
-  bool active, dhcp = false;
+  bool active, dhcp = false, checksum = false;
+  ToledoWeightScale toledoWeightScale = ToledoWeightScale.standard;
   IndicatorConnectionType? connectionType;
   int? tcpPort, baudRate, dataBits;
   int? stopBits;
-  int timeoutMs = 5000, reconnectIntervalMs = 3000;
+  int timeoutMs = 2000, reconnectIntervalMs = 3000;
+
+  String get comPort => (windowsPort ?? '').trim().toUpperCase();
+
+  /// A identidade da conexão exclui os campos apenas descritivos.
+  Object get serialParameters => (
+    modelCode,
+    protocol,
+    comPort,
+    baudRate,
+    dataBits,
+    parity,
+    stopBits,
+    flowControl,
+    checksum,
+    toledoWeightScale,
+    timeoutMs,
+    reconnectIntervalMs,
+  );
+
+  String? get serialProtocolError =>
+      toledoSerialModels.contains(modelCode) &&
+          protocol == toledoContinuousProtocol
+      ? null
+      : 'A leitura serial requer IND560 ou IND570 com saída MT Continuous padrão.';
 
   void selectModel(IndicatorModel model) {
+    if (modelCode == model.code) return;
     modelCode = model.code;
     // Uma troca de modelo não herda parâmetros de outro equipamento.
     connectionType = null;
@@ -113,7 +211,30 @@ class IndicatorInstallation {
     mask = null;
     gateway = null;
     dhcp = false;
+    checksum = false;
+    toledoWeightScale = ToledoWeightScale.standard;
     windowsPort = null;
+    if (toledoSerialModels.contains(model.code) && model.serial != null) {
+      final serial = model.serial!;
+      baudRate = serial.baudRates.contains(4800) ? 4800 : null;
+      dataBits = serial.dataBits.contains(7) ? 7 : null;
+      parity = serial.parities.contains('Even') ? 'Even' : null;
+      stopBits = serial.stopBits.contains(2) ? 2 : null;
+      flowControl = serial.flowControls.contains('None') ? 'None' : null;
+      checksum = true;
+    }
+  }
+
+  void selectConnectionType(
+    IndicatorConnectionType type,
+    IndicatorModel model,
+  ) {
+    connectionType = type;
+    if (type == IndicatorConnectionType.serial &&
+        toledoSerialModels.contains(model.code) &&
+        model.protocols.contains(toledoContinuousProtocol)) {
+      protocol ??= toledoContinuousProtocol;
+    }
   }
 
   List<String> validate(IndicatorModel model) {
@@ -143,7 +264,15 @@ class IndicatorInstallation {
     }
     if (connectionType == IndicatorConnectionType.serial) {
       final serial = model.serial;
-      if ((windowsPort ?? '').trim().isEmpty) {
+      if (toledoWeightScale == ToledoWeightScale.comToolIntegerKg &&
+          protocol == toledoContinuousProtocol &&
+          !checksum) {
+        errors.add('O perfil ComTool requer checksum ativo.');
+      }
+      if (reconnectIntervalMs > 0 && reconnectIntervalMs < 250) {
+        errors.add('Reconexão serial requer pelo menos 250 ms.');
+      }
+      if (!RegExp(r'^COM[1-9][0-9]*$').hasMatch(comPort)) {
         errors.add('Informe a porta COM da estação.');
       }
       if (serial == null ||
@@ -154,7 +283,8 @@ class IndicatorInstallation {
           !serial.stopBits.contains(stopBits)) {
         errors.add('Revise os parâmetros Serial do modelo.');
       }
-      if (serial != null &&
+      if ((channel != null || physicalInterface != null) &&
+          serial != null &&
           serial.interfacesByChannel.isNotEmpty &&
           !(serial.interfacesByChannel[channel] ?? []).contains(
             physicalInterface,
@@ -173,6 +303,9 @@ class IndicatorInstallation {
     'connectionType': connectionType?.name,
     'protocol': protocol,
     'host': host,
+    'mask': mask,
+    'gateway': gateway,
+    'dhcp': dhcp,
     'tcpPort': tcpPort,
     'timeoutMs': timeoutMs,
     'reconnectIntervalMs': reconnectIntervalMs,
@@ -182,6 +315,8 @@ class IndicatorInstallation {
     'parity': parity,
     'stopBits': stopBits,
     'flowControl': flowControl,
+    'checksum': checksum,
+    'toledoWeightScale': toledoWeightScale.name,
     'channel': channel,
     'physicalInterface': physicalInterface,
   };
@@ -198,8 +333,11 @@ class IndicatorInstallation {
         .firstOrNull;
     item.protocol = json['protocol'] as String?;
     item.host = json['host'] as String?;
+    item.mask = json['mask'] as String?;
+    item.gateway = json['gateway'] as String?;
+    item.dhcp = json['dhcp'] as bool? ?? false;
     item.tcpPort = json['tcpPort'] as int?;
-    item.timeoutMs = json['timeoutMs'] as int? ?? 5000;
+    item.timeoutMs = json['timeoutMs'] as int? ?? 2000;
     item.reconnectIntervalMs = json['reconnectIntervalMs'] as int? ?? 3000;
     item.windowsPort = json['windowsPort'] as String?;
     item.baudRate = json['baudRate'] as int?;
@@ -207,6 +345,10 @@ class IndicatorInstallation {
     item.parity = json['parity'] as String?;
     item.stopBits = json['stopBits'] as int?;
     item.flowControl = json['flowControl'] as String?;
+    item.checksum = json['checksum'] as bool? ?? false;
+    if (json['toledoWeightScale'] case final String scale) {
+      item.toledoWeightScale = ToledoWeightScale.values.byName(scale);
+    }
     item.channel = json['channel'] as String?;
     item.physicalInterface = json['physicalInterface'] as String?;
     return item;
@@ -225,6 +367,39 @@ bool isValidIpv4(String value) {
 class IndicatorConfiguration extends ChangeNotifier {
   final models = initialIndicatorModels();
   final installations = <IndicatorInstallation>[];
+  IndicatorMode mode = IndicatorMode.simulated;
+  String? operationalId;
+  IndicatorInstallation? get operational =>
+      installations.where((item) => item.id == operationalId).firstOrNull;
+
+  void restoreStation(Map<String, dynamic>? json) {
+    final modeName = json?['mode'];
+    final savedMode = IndicatorMode.values
+        .where((mode) => mode.name == modeName)
+        .firstOrNull;
+    if (modeName != null && savedMode == null) {
+      throw const FormatException('Modo de pesagem da estação inválido.');
+    }
+    final rows = (json?['installations'] as List?) ?? [];
+    final loaded = rows
+        .map(
+          (row) => IndicatorInstallation.fromJson(row as Map<String, dynamic>),
+        )
+        .toList();
+    update(() {
+      mode = savedMode ?? IndicatorMode.simulated;
+      operationalId = json?['operationalId'] as String?;
+      installations
+        ..clear()
+        ..addAll(loaded);
+    });
+  }
+
+  Map<String, dynamic> stationJson() => {
+    'mode': mode.name,
+    'operationalId': operationalId,
+    'installations': [for (final item in installations) item.toJson()],
+  };
   void update(VoidCallback change) {
     change();
     notifyListeners();
@@ -272,7 +447,7 @@ List<IndicatorModel> initialIndicatorModels() => [
     ),
     tcp: const TcpCapabilities(dhcp: true, primaryPortReference: 1701),
     protocols: [
-      'MT Continuous / Continuous Output',
+      toledoContinuousProtocol,
       'Continuous Template',
       'Demand Output',
     ],
@@ -285,7 +460,35 @@ List<IndicatorModel> initialIndicatorModels() => [
     code: 'IND560',
     manufacturer: 'Mettler Toledo',
     model: 'IND560',
-    notes: 'PLC Manual insuficiente. Aguardar Terminal User Guide/manual técnico; capacidades não confirmadas.',
+    notes: 'COM2/COM3 dependem da placa opcional. Confira o canal e a interface física do terminal.',
+    serial: const SerialCapabilities(
+      baudRates: [
+        300,
+        600,
+        1200,
+        2400,
+        4800,
+        9600,
+        19200,
+        38400,
+        57600,
+        115200,
+      ],
+      dataBits: [7, 8],
+      parities: ['None', 'Odd', 'Even'],
+      flowControls: ['None', 'XON/XOFF'],
+      stopBits: [1, 2],
+      interfacesByChannel: {
+        'COM1': ['RS-232', 'RS-422', 'RS-485'],
+        'COM2': ['RS-232'],
+        'COM3': ['RS-232', 'RS-422', 'RS-485'],
+      },
+    ),
+    protocols: [
+      toledoContinuousProtocol,
+      'Continuous Template',
+      'Demand Output',
+    ],
   ),
   IndicatorModel(
     code: 'G10K',

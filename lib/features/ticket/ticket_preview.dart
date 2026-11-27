@@ -4,9 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../configuracoes/settings_models.dart';
-import 'a4_ticket.dart';
-import 'thermal_ticket.dart';
 import 'ticket_mock_data.dart';
+import 'ticket_paper.dart';
 import 'ticket_pesagem.dart';
 
 Future<void> showTicketPreview(
@@ -165,9 +164,7 @@ class _TicketPreviewState extends State<_TicketPreview> {
               color: const Color(0xffe5e7e7),
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final paperWidth = _format == PrinterFormat.ticket
-                      ? 340.0
-                      : 720.0;
+                  final paperWidth = TicketPaper.widthFor(_format);
                   return Scrollbar(
                     controller: _vertical,
                     thumbVisibility: true,
@@ -190,11 +187,9 @@ class _TicketPreviewState extends State<_TicketPreview> {
                               padding: const EdgeInsets.all(20),
                               child: Align(
                                 alignment: Alignment.topCenter,
-                                child: SizedBox(
-                                  width: paperWidth,
-                                  child: _format == PrinterFormat.ticket
-                                      ? ThermalTicket(ticket: _ticket)
-                                      : A4Ticket(ticket: _ticket),
+                                child: TicketPaper(
+                                  ticket: _ticket,
+                                  format: _format,
                                 ),
                               ),
                             ),

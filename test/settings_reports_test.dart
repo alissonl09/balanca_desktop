@@ -253,56 +253,41 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Impressoras simuladas, papel por impressora e contingência A4', (
+  testWidgets('Modo simulado é explícito e não exibe filas fictícias', (
     tester,
   ) async {
     await open(tester);
     await tap(tester, key('settings-tab-printing'));
-    await dropdown(tester, 'printer-selection', 'Ticket Rede (simulada)');
-    expect(find.text('Offline (simulado)'), findsOneWidget);
-    expect(find.text('192.168.1.50'), findsOneWidget);
-    await dropdown(tester, 'printer-selection', 'A4 USB (simulada)');
-    expect(find.text('USB002'), findsOneWidget);
-    await dropdown(tester, 'paper-size-a4-usb', 'Carta');
-    await dropdown(tester, 'paper-source-a4-usb', 'Alimentação manual');
-    await dropdown(tester, 'paper-orientation-a4-usb', 'Paisagem');
-    await dropdown(tester, 'printer-selection', 'Ticket USB (simulada)');
-    expect(find.text('USB001'), findsOneWidget);
-    expect(
-      tester
-          .widget<DropdownButtonFormField<String>>(key('paper-size-ticket-usb'))
-          .initialValue,
-      'Bobina 80 mm',
-    );
-    await dropdown(tester, 'printer-selection', 'A4 USB (simulada)');
-    expect(
-      tester
-          .widget<DropdownButtonFormField<String>>(key('paper-size-a4-usb'))
-          .initialValue,
-      'Carta',
-    );
-    expect(
-      state(tester).printing.paperByPrinter['a4-usb']!.orientation,
-      PaperOrientation.landscape,
-    );
-    await dropdown(tester, 'fallback-printer', 'A4 Rede (simulada)');
-    expect(state(tester).printing.fallbackPrinterId, 'a4-rede');
+    expect(find.text('Prévia e testes simulados, sem envio.'), findsOneWidget);
+    expect(find.text('Impressora Windows'), findsNothing);
+    await tap(tester, find.text('Testar impressão').first);
+    expect(find.text('Teste simulado de impressão.'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets(
-    'Impressão limita cópias e três linhas, compartilha textos nas prévias e restaura imagem',
+    'Impressão valida cópias, compartilha textos nas prévias e restaura imagem',
     (tester) async {
       await open(tester);
       await tap(tester, key('settings-tab-printing'));
       expect(find.text('0/3 linhas'), findsNWidgets(2));
-      await fill(tester, 'ticket-copies', '0');
+      final copies = find.byKey(
+        const ValueKey(('print-copies', PrinterFormat.ticket)),
+      );
+      await tester.ensureVisible(copies);
+      await tester.enterText(copies, '0');
+      await tester.pumpAndSettle();
       await tap(tester, key('save-settings'));
-      expect(find.text('Informe de 1 a 10 cópias.'), findsOneWidget);
-      await fill(tester, 'ticket-copies', '11');
-      await tap(tester, key('save-settings'));
-      expect(find.text('Informe de 1 a 10 cópias.'), findsOneWidget);
-      await fill(tester, 'ticket-copies', '2');
+      expect(find.text('Informe pelo menos uma cópia.'), findsOneWidget);
+      await tester.ensureVisible(copies);
+      await tester.enterText(copies, '11');
+      await tester.pumpAndSettle();
+      final a4Copies = find.byKey(
+        const ValueKey(('print-copies', PrinterFormat.a4)),
+      );
+      await tester.ensureVisible(a4Copies);
+      await tester.enterText(a4Copies, '2');
+      await tester.pumpAndSettle();
       await fill(tester, 'ticket-header', 'Linha 1\nLinha 2\nLinha 3\nLinha 4');
       await fill(
         tester,
@@ -312,18 +297,28 @@ void main() {
       expect(state(tester).printing.header, 'Linha 1\nLinha 2\nLinha 3');
       expect(state(tester).printing.footer, 'Rodapé 1\nRodapé 2\nRodapé 3');
       expect(find.text('3/3 linhas'), findsNWidgets(2));
-      await tap(tester, toggle('Entrada'));
-      await tap(tester, toggle('Saída'));
-      await tap(tester, toggle('Ticket Windows'));
+      await tap(tester, key('print-auto-entry'));
+      await tap(tester, key('print-auto-exit'));
       expect(state(tester).printing.emitEntry, isFalse);
       expect(state(tester).printing.emitExit, isFalse);
-      expect(state(tester).printing.windowsTicket, isTrue);
       await tap(tester, find.text('Alterar imagem'));
       await tap(tester, find.text('Imagem de demonstração'));
       expect(state(tester).printing.logo, TicketLogo.demonstration);
+      await fill(
+        tester,
+        'ticket-company-name',
+        'Cooperativa - unidade de teste',
+      );
       for (final format in ['Ticket', 'A4']) {
         await tap(tester, find.text('Visualizar $format'));
         expect(key('print-layout-preview'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: key('print-layout-preview'),
+            matching: find.text('Cooperativa - unidade de teste'),
+          ),
+          findsOneWidget,
+        );
         expect(
           find.descendant(
             of: key('print-layout-preview'),
@@ -345,9 +340,12 @@ void main() {
       expect(state(tester).printing.logo, TicketLogo.standard);
       await tap(tester, key('save-settings'));
       expect(
-        find.textContaining('Configurações mantidas somente nesta sessão.'),
+        find.text('Configuração de impressão salva nesta estação.'),
         findsOneWidget,
       );
+      expect(state(tester).savedPrinting.ticket.copies, 11);
+      expect(state(tester).savedPrinting.a4.copies, 2);
+      expect(state(tester).savedPrinting.emitExit, isFalse);
       expect(tester.takeException(), isNull);
     },
   );

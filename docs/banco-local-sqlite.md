@@ -46,7 +46,9 @@ máquina e provisionar suas ACLs no instalador.
 Na abertura são configurados `foreign_keys=ON`, `journal_mode=WAL`,
 `busy_timeout=5000`, `synchronous=FULL`, `trusted_schema=OFF` e o modo defensivo
 do SQLite. A aplicação não substitui um banco indisponível por armazenamento
-volátil silenciosamente. A manutenção oferece diagnóstico e nova tentativa.
+volátil silenciosamente. Na aba Banco de Dados, **Testar conexão** consulta a
+conexão já aberta. A abertura e a inicialização do banco continuam no início
+do aplicativo.
 
 O SQLite depende também do funcionamento do disco, do sistema operacional e
 do hardware para cumprir as garantias de persistência. Não há segredo de
@@ -71,6 +73,11 @@ As duas leituras atuais foram preservadas para não remodelar o domínio.
 Uma futura tabela de leituras pode ser introduzida por migration específica.
 
 ## Backup e restauração
+
+A aba mostra o caminho do banco em somente leitura. Backup e restauração são
+ações individuais. O esquema, o tamanho em disco, a verificação de integridade,
+a compactação, os scripts e o histórico ficam recolhidos em **Manutenção
+avançada**.
 
 Backups usam a API de backup do SQLite, incluindo dados confirmados no WAL.
 Cada snapshot é aberto e submetido a `integrity_check` e `foreign_key_check`.

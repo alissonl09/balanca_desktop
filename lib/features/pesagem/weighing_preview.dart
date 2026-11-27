@@ -1,28 +1,49 @@
 import 'manual_capture/capture_models.dart';
 
+const invoiceWeightField = 'Peso N.F. (Kg)';
+
+double? parseInvoiceWeight(String? value, {bool decimalPoint = false}) {
+  if (value == null || value.trim().isEmpty) return null;
+  var normalized = value.trim().replaceAll(' ', '');
+  if (!decimalPoint) {
+    if (normalized.contains(',')) {
+      if (!RegExp(r'^[+-]?(?:\d*|\d{1,3}(?:\.\d{3})+),\d+$')
+          .hasMatch(normalized)) {
+        return null;
+      }
+      normalized = normalized.replaceAll('.', '').replaceAll(',', '.');
+    } else if (RegExp(r'^[+-]?\d{1,3}(?:\.\d{3})+$').hasMatch(normalized)) {
+      normalized = normalized.replaceAll('.', '');
+    }
+  }
+  final number = double.tryParse(normalized);
+  return number != null && number.isFinite ? number : null;
+}
+
 /// Estado de apresentação. Não representa um contrato da Libra-API.
 class WeighingSummary {
   const WeighingSummary({
     this.first = 0,
     this.second = 0,
-    this.net = 0,
-    this.dry = 0,
+    double? net,
     this.firstWeighedAt,
     this.secondWeighedAt,
-  });
+  }) : netWeight = net;
 
-  final double first, second, net, dry;
+  final double first, second;
+  final double? netWeight;
   final DateTime? firstWeighedAt, secondWeighedAt;
+
+  double get net => netWeight ?? 0;
 
   /// Heurística provisória apenas para identificar a confirmação na interface.
   /// A classificação definitiva será fornecida pela regra real da operação.
-  bool get isClosing => [first, second, net, dry].any((weight) => weight > 0);
+  bool get isClosing => [first, second, net].any((weight) => weight > 0);
 
   Map<String, double> get values => {
     'Pesagem 1': first,
     'Pesagem 2': second,
     'Peso Líquido': net,
-    'Peso Seco': dry,
   };
 }
 
@@ -37,6 +58,7 @@ class WeighingPreview {
     this.capturedAt,
     this.manualJustification,
     this.manualEvidence,
+    this.indicatorSource,
   }) : operation = Map.unmodifiable(operation);
 
   final String plate, trailer;
@@ -47,6 +69,7 @@ class WeighingPreview {
   final String? manualJustification;
   final ManualWeighingEvidence? manualEvidence;
   final DateTime? capturedAt;
+  final String? indicatorSource;
   bool get isManual => manualOperator != null;
 }
 
@@ -78,3 +101,7 @@ String formatWeight(double weight) => weight == weight.roundToDouble()
           .toStringAsFixed(3)
           .replaceFirst(RegExp(r'0+$'), '')
           .replaceAll('.', ',');
+
+String formatIndicatorWeight(double weight, int decimalPlaces) => weight
+    .toStringAsFixed(decimalPlaces < 0 ? 0 : decimalPlaces)
+    .replaceAll('.', ',');

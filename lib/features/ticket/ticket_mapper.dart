@@ -11,7 +11,12 @@ TicketPesagem ticketFromSession(
   SettingsState settings, {
   DateTime? issuedAt,
   TicketIdentifierFactory identifierFactory = previewTicketIdentifier,
+  PrintSettings? savedPrinting,
 }) {
+  final printing = savedPrinting ?? settings.printing;
+  final number = savedPrinting == null
+      ? session.ticketNumber
+      : session.officialTicketNumber;
   final current = session.current;
   final operation = current?.operation ?? const <String, String>{};
   final summary = current?.summary ?? const WeighingSummary();
@@ -47,7 +52,7 @@ TicketPesagem ticketFromSession(
       .where((unit) => unit.code == settings.unitCode)
       .firstOrNull;
   return TicketPesagem(
-    ticketNumber: session.ticketNumber,
+    ticketNumber: number,
     documents: _multiple(operation['Nº Nota(s) / Documento(s)']),
     documentType: _text(operation['Tipo do documento']),
     // Os campos sem fonte definida são deliberadamente deixados nulos.
@@ -58,17 +63,15 @@ TicketPesagem ticketFromSession(
     driver: _text(operation['Motorista']),
     issuers: _multiple(operation['Emissor(es)']),
     depot: _text(operation['Depósito']),
-    invoiceWeight: _number(operation['Peso N.F. (Kg)']),
+    invoiceWeight: parseInvoiceWeight(
+      operation[invoiceWeightField],
+      decimalPoint: session.invoiceWeightUsesDecimalPoint,
+    ),
     firstWeight: first,
     secondWeight: second,
     firstWeighedAt: firstAt,
     secondWeighedAt: secondAt,
-    // Zero inicial sem cálculo e sem segunda pesagem não é um líquido apurado.
-    netWeight:
-        summary.net > 0 || summary.second > 0 || summary.secondWeighedAt != null
-        ? summary.net
-        : null,
-    dryWeight: summary.dry > 0 ? summary.dry : null,
+    netWeight: summary.netWeight,
     observation: _text(operation['Observação']),
     operatorName: _text(operation['Operador']),
     issuedAt: issuedAt ?? DateTime.now(),
@@ -77,14 +80,16 @@ TicketPesagem ticketFromSession(
         : TicketCaptureType.automatic,
     manualAuthorizer: manual ? matchingCapture?.manualOperator : null,
     manualJustification: manual ? matchingCapture?.manualJustification : null,
-    traceabilityId: identifierFactory(session.ticketNumber),
+    traceabilityId: identifierFactory(number),
     branding: TicketBranding(
-      logo: settings.printing.logo == TicketLogo.demonstration
+      logo: printing.logo == TicketLogo.demonstration
           ? TicketLogoKind.demonstration
           : TicketLogoKind.standard,
+      companyName:
+          _text(printing.companyName) ?? TicketBranding.defaultCompanyName,
       unitLabel: unit?.label,
-      headerLines: _lines(settings.printing.header),
-      footerLines: _lines(settings.printing.footer),
+      headerLines: _lines(printing.header),
+      footerLines: _lines(printing.footer),
     ),
   );
 }
@@ -106,14 +111,3 @@ List<String> _lines(String value) => value.isEmpty
           .split('\n')
           .take(3)
           .toList();
-double? _number(String? value) {
-  if (value == null || value.trim().isEmpty) return null;
-  var normalized = value.trim().replaceAll(' ', '');
-  if (normalized.contains(',')) {
-    normalized = normalized.replaceAll('.', '').replaceAll(',', '.');
-  } else if (RegExp(r'^-?\d{1,3}(\.\d{3})+$').hasMatch(normalized)) {
-    normalized = normalized.replaceAll('.', '');
-  }
-  final number = double.tryParse(normalized);
-  return number != null && number.isFinite ? number : null;
-}

@@ -15,6 +15,39 @@ enum AppPermission {
   insertRegistry('Cadastros', 'Inserir'),
   editRegistry('Cadastros', 'Alterar'),
   deactivateRegistry('Cadastros', 'Inativar/Excluir logicamente'),
+  readParties('Cadastros', 'Consultar remetentes / destinatários'),
+  insertParties('Cadastros', 'Inserir remetentes / destinatários'),
+  editParties('Cadastros', 'Alterar remetentes / destinatários'),
+  deactivateParties('Cadastros', 'Inativar remetentes / destinatários'),
+  readCarriers('Cadastros', 'Consultar transportadoras'),
+  insertCarriers('Cadastros', 'Inserir transportadoras'),
+  editCarriers('Cadastros', 'Alterar transportadoras'),
+  deactivateCarriers('Cadastros', 'Inativar transportadoras'),
+  readDrivers('Cadastros', 'Consultar motoristas'),
+  insertDrivers('Cadastros', 'Inserir motoristas'),
+  editDrivers('Cadastros', 'Alterar motoristas'),
+  deactivateDrivers('Cadastros', 'Inativar motoristas'),
+  readPlates('Cadastros', 'Consultar placas'),
+  insertPlates('Cadastros', 'Inserir placas'),
+  editPlates('Cadastros', 'Alterar placas'),
+  deactivatePlates('Cadastros', 'Inativar placas'),
+  manageDriverPlates('Cadastros', 'Manter vínculos motorista–placa'),
+  readItems('Cadastros', 'Consultar itens / produtos'),
+  insertItems('Cadastros', 'Inserir itens / produtos'),
+  editItems('Cadastros', 'Alterar itens / produtos'),
+  deactivateItems('Cadastros', 'Inativar itens / produtos'),
+  readOperations('Cadastros', 'Consultar operações'),
+  insertOperations('Cadastros', 'Inserir operações'),
+  editOperations('Cadastros', 'Alterar operações'),
+  deactivateOperations('Cadastros', 'Inativar operações'),
+  readTolerances('Cadastros', 'Consultar regras de tolerância'),
+  insertTolerances('Cadastros', 'Inserir regras de tolerância'),
+  editTolerances('Cadastros', 'Alterar regras de tolerância'),
+  deactivateTolerances('Cadastros', 'Inativar regras de tolerância'),
+  readAttributes('Cadastros', 'Consultar informações complementares'),
+  insertAttributes('Cadastros', 'Inserir informações complementares'),
+  editAttributes('Cadastros', 'Alterar informações complementares'),
+  deactivateAttributes('Cadastros', 'Inativar informações complementares'),
   readReports('Relatórios', 'Consultar'),
   printReports('Relatórios', 'Imprimir'),
   exportReports('Relatórios', 'Exportar'),
@@ -59,6 +92,18 @@ abstract interface class UserDirectory {
 }
 
 class PermissionState extends ChangeNotifier implements UserDirectory {
+  static const _registryConsultation = {
+    AppPermission.readRegistry,
+    AppPermission.readParties,
+    AppPermission.readCarriers,
+    AppPermission.readDrivers,
+    AppPermission.readPlates,
+    AppPermission.readItems,
+    AppPermission.readOperations,
+    AppPermission.readTolerances,
+    AppPermission.readAttributes,
+  };
+
   final profiles = [
     PermissionProfile(0, 'Master', AppPermission.values.toSet()),
     PermissionProfile(1, 'Administrador', AppPermission.values.toSet()),
@@ -70,15 +115,18 @@ class PermissionState extends ChangeNotifier implements UserDirectory {
       AppPermission.releaseDivergence,
       AppPermission.reprintTicket,
       AppPermission.editOpen,
+      ..._registryConsultation,
     }),
     PermissionProfile(3, 'Líder de Operação', {
       AppPermission.weigh,
       AppPermission.releaseDivergence,
       AppPermission.reprintTicket,
+      ..._registryConsultation,
     }),
     PermissionProfile(4, 'Operador', {
       AppPermission.weigh,
       AppPermission.reprintTicket,
+      ..._registryConsultation,
     }),
   ];
   final users = [
@@ -87,7 +135,14 @@ class PermissionState extends ChangeNotifier implements UserDirectory {
     DirectoryUser('balanca', 'Autorizador local de demonstração', 'MOCK', 2),
     DirectoryUser('carlos', 'CARLOS ALMEIDA', '12345', 4),
   ];
-  String currentUserId = 'alisson';
+  String _currentUserId = 'alisson';
+  String get currentUserId => _currentUserId;
+  set currentUserId(String id) {
+    if (id == _currentUserId) return;
+    _currentUserId = id;
+    notifyListeners();
+  }
+
   PermissionProfile profile(int code) =>
       profiles.firstWhere((p) => p.code == code);
   bool userAllows(String id, AppPermission permission) {

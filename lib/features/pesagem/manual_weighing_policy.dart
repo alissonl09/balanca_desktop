@@ -7,7 +7,7 @@ class ManualWeighingPolicy {
     required IndicatorReading reading,
     required PermissionState permissions,
   }) =>
-      (enabled || !reading.connected) &&
+      (enabled || reading.allowsManualContingency) &&
       permissions.allows(AppPermission.weigh) &&
       permissions.allows(AppPermission.useManual);
 }

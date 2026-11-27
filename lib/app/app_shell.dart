@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'dart:convert';
 import 'dart:math';
+import 'dart:ui' show AppExitResponse;
 
 import '../core/database/database_manager.dart';
 import '../core/offline/sqlite_pesagem_store.dart';
@@ -20,9 +21,11 @@ import '../features/pesagem/pesagem_actions.dart';
 import '../features/pesagem/operation_lookup.dart';
 import '../core/libra/libra_configuration.dart';
 import '../core/libra/libra_settings_store.dart';
+import '../core/indicators/indicator_settings_store.dart';
 import '../core/offline/offline_models.dart';
 import '../features/relatorios/relatorios_page.dart';
 import '../features/ticket/ticket_session.dart';
+import '../features/ticket/printer_service.dart';
 import '../core/permissions/permission_models.dart';
 
 class AppShell extends StatefulWidget {
@@ -33,10 +36,22 @@ class AppShell extends StatefulWidget {
     this.libraStore,
     this.libraSettings,
     this.database,
+    this.indicatorStore,
+    this.indicatorSettings = const IndicatorSettingsData(),
+    this.printStore,
+    this.printStations = const {},
+    this.printSettingsLoadFailed = false,
+    this.printerService,
   });
   final LibraSettingsStore? libraStore;
   final LibraSettingsData? libraSettings;
   final DatabaseManager? database;
+  final LocalIndicatorSettingsStore? indicatorStore;
+  final IndicatorSettingsData indicatorSettings;
+  final LocalPrintSettingsStore? printStore;
+  final Map<String, Map<String, dynamic>> printStations;
+  final bool printSettingsLoadFailed;
+  final PrinterService? printerService;
   final OfflineStation? station;
   final OperationLookupService? lookupService;
   @override
@@ -45,13 +60,21 @@ class AppShell extends StatefulWidget {
 
 enum _AppPage { pesagem, cadastros, relatorios, configuracoes }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   _AppPage _page = _AppPage.pesagem;
-  final _cadastrosMemory = CadastrosMemory.mock();
+  late final _cadastrosReal = CadastrosMemory.real(_settings.permissions);
+  CadastrosMemory? _cadastrosDemo;
+  late CadastrosMemory _cadastros = _cadastrosReal;
   late final _settings = SettingsState(
     libraStore: widget.libraStore,
     libraSettings: widget.libraSettings,
     database: widget.database,
+    indicatorStore: widget.indicatorStore,
+    indicatorSettings: widget.indicatorSettings,
+    printStore: widget.printStore,
+    printStations: widget.printStations,
+    printSettingsLoadFailed: widget.printSettingsLoadFailed,
+    printerService: widget.printerService,
   );
   var _ticketSession = TicketSession();
   String? _stationLoadError;
@@ -72,6 +95,7 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.database?.isOperationActive = () =>
         _ticketSession.phase == WeighingPhase.aberta ||
         _station.weighings.any(
@@ -122,11 +146,25 @@ class _AppShellState extends State<AppShell> {
     if (mounted) setState(() {});
   }
 
+  void _setCadastroSimulation(bool enabled) => setState(() {
+    _cadastros = enabled
+        ? (_cadastrosDemo ??= CadastrosMemory.mock(_settings.permissions))
+        : _cadastrosReal;
+  });
+
+  @override
+  Future<AppExitResponse> didRequestAppExit() async {
+    await _settings.serialIndicator.close();
+    return AppExitResponse.exit;
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.database?.isOperationActive = null;
     widget.database?.onRestored = null;
-    _cadastrosMemory.dispose();
+    _cadastrosReal.dispose();
+    _cadastrosDemo?.dispose();
     _settings.permissions.removeListener(_permissionsChanged);
     _settings.dispose();
     if (widget.station == null) _station.dispose();
@@ -138,6 +176,7 @@ class _AppShellState extends State<AppShell> {
     final size = MediaQuery.sizeOf(context);
     final small = size.width <= 900;
     final compact = size.width > 1250 && size.height <= 950;
+    final shortWeighing = _page == _AppPage.pesagem && size.height < 620;
     return PesagemActionScope(
       dispatcher: _pesagemActions,
       enabled: _page == _AppPage.pesagem,
@@ -148,6 +187,7 @@ class _AppShellState extends State<AppShell> {
             _Header(
               small: small,
               compact: _page == _AppPage.pesagem ? size.height <= 950 : compact,
+              short: shortWeighing,
               station: _station,
             ),
             Expanded(
@@ -220,8 +260,9 @@ class _AppShellState extends State<AppShell> {
                                 child: _page == _AppPage.cadastros
                                     ? CadastrosPage(
                                         compact: compact,
-                                        memory: _cadastrosMemory,
-                                        permissions: _settings.permissions,
+                                        memory: _cadastros,
+                                        onSimulationChanged:
+                                            _setCadastroSimulation,
                                       )
                                     : _page == _AppPage.relatorios
                                     ? RelatoriosPage(compact: compact)
@@ -237,7 +278,11 @@ class _AppShellState extends State<AppShell> {
                                       size.width >= 1800 && size.height >= 1000
                                       ? 24
                                       : 12,
-                                  vertical: size.height >= 1000 ? 18 : 10,
+                                  vertical: shortWeighing
+                                      ? 3
+                                      : size.height >= 1000
+                                      ? 18
+                                      : 10,
                                 ),
                                 child:
                                     (widget.database != null &&
@@ -336,20 +381,23 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.small,
     required this.compact,
+    required this.short,
     required this.station,
   });
-  final bool small, compact;
+  final bool small, compact, short;
   final OfflineStation station;
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: compact ? 62 : 70,
+    height: short ? 48 : (compact ? 62 : 70),
     child: Padding(
       padding: EdgeInsets.symmetric(horizontal: small ? 16 : 30),
       child: Row(
         children: [
           AppAsset(
             'logo-topo',
-            size: small
+            size: short
+                ? 40
+                : small
                 ? 48
                 : compact
                 ? 50

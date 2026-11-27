@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'pesagem_layout.dart';
@@ -69,20 +71,31 @@ class _PesagemSidePanelState extends State<PesagemSidePanel> {
   }
 
   @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    key: const ValueKey('pesagem-side-panel'),
-    child: Column(
-      children: [
-        _queue(),
-        if (widget.accessControl != null) ...[
-          SizedBox(height: layout.gap),
-          VisualCard(
-            key: const ValueKey('access-control-card'),
-            padding: EdgeInsets.all(layout.panelPadding),
-            child: widget.accessControl!,
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (_, constraints) => SingleChildScrollView(
+      key: const ValueKey('pesagem-side-panel'),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: math.max(
+            constraints.maxHeight,
+            widget.accessControl == null ? 180 : 420,
           ),
-        ],
-      ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(child: _queue()),
+            if (widget.accessControl != null) ...[
+              SizedBox(height: layout.gap),
+              VisualCard(
+                key: const ValueKey('access-control-card'),
+                padding: EdgeInsets.all(layout.panelPadding),
+                child: widget.accessControl!,
+              ),
+            ],
+          ],
+        ),
+      ),
     ),
   );
 
@@ -98,6 +111,7 @@ class _PesagemSidePanelState extends State<PesagemSidePanel> {
     return VisualCard(
       padding: EdgeInsets.all(layout.spacious ? 16 : 10),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
@@ -211,83 +225,85 @@ class _PesagemSidePanelState extends State<PesagemSidePanel> {
               ),
             ],
           ),
-          SizedBox(
-            key: const ValueKey('operation-list-area'),
-            height: layout.queueRowHeight * 5,
-            child: vehicles.isEmpty
-                ? Center(
-                    child: Text(
-                      yard
-                          ? 'Nenhum veículo no pátio encontrado.'
-                          : 'Nenhuma operação encontrada.',
-                      style: TextStyle(fontSize: 13),
-                    ),
-                  )
-                : Scrollbar(
-                    controller: _operationScroll,
-                    thumbVisibility: vehicles.length > 5,
-                    thickness: 4,
-                    radius: const Radius.circular(4),
-                    child: ListView.builder(
-                      key: const ValueKey('operation-list'),
+          Flexible(
+            child: SizedBox(
+              key: const ValueKey('operation-list-area'),
+              height: layout.queueRowHeight * 5,
+              child: vehicles.isEmpty
+                  ? Center(
+                      child: Text(
+                        yard
+                            ? 'Nenhum veículo no pátio encontrado.'
+                            : 'Nenhuma operação encontrada.',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                    )
+                  : Scrollbar(
                       controller: _operationScroll,
-                      primary: false,
-                      padding: const EdgeInsets.only(right: 8),
-                      itemExtent: layout.queueRowHeight,
-                      itemCount: vehicles.length,
-                      itemBuilder: (context, index) {
-                        final vehicle = vehicles[index];
-                        return Container(
-                          key: ValueKey('queue-row-${vehicle.plate}-$index'),
-                          decoration: BoxDecoration(
-                            border: index == vehicles.length - 1
-                                ? null
-                                : const Border(
-                                    bottom: BorderSide(
-                                      color: Color(0xffedf0f1),
+                      thumbVisibility: vehicles.length > 5,
+                      thickness: 4,
+                      radius: const Radius.circular(4),
+                      child: ListView.builder(
+                        key: const ValueKey('operation-list'),
+                        controller: _operationScroll,
+                        primary: false,
+                        padding: const EdgeInsets.only(right: 8),
+                        itemExtent: layout.queueRowHeight,
+                        itemCount: vehicles.length,
+                        itemBuilder: (context, index) {
+                          final vehicle = vehicles[index];
+                          return Container(
+                            key: ValueKey('queue-row-${vehicle.plate}-$index'),
+                            decoration: BoxDecoration(
+                              border: index == vehicles.length - 1
+                                  ? null
+                                  : const Border(
+                                      bottom: BorderSide(
+                                        color: Color(0xffedf0f1),
+                                      ),
+                                    ),
+                            ),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 70,
+                                  child: Text(
+                                    vehicle.plate,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                          ),
-                          child: Row(
-                            children: [
-                              SizedBox(
-                                width: 70,
-                                child: Text(
-                                  vehicle.plate,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
+                                ),
+                                const SizedBox(width: 7),
+                                Expanded(
+                                  child: Text(
+                                    _trailerLabel(vehicle.trailer),
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xff495057),
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 7),
-                              Expanded(
-                                child: Text(
-                                  _trailerLabel(vehicle.trailer),
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xff495057),
+                                const SizedBox(width: 7),
+                                SizedBox(
+                                  width: 42,
+                                  child: Text(
+                                    vehicle.time,
+                                    textAlign: TextAlign.right,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xff495057),
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 7),
-                              SizedBox(
-                                width: 42,
-                                child: Text(
-                                  vehicle.time,
-                                  textAlign: TextAlign.right,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xff495057),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+                              ],
+                            ),
+                          );
+                        },
+                      ),
                     ),
-                  ),
+            ),
           ),
         ],
       ),

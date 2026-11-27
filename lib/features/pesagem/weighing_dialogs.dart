@@ -60,11 +60,11 @@ class _ConfirmationDialogState extends State<_ConfirmationDialog> {
     try {
       await widget.onSave();
       if (mounted) Navigator.pop(context, true);
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         setState(() {
           _saving = false;
-          _error = 'Não foi possível salvar a pesagem. Verifique as permissões e tente novamente.';
+          _error = error is FormatException ? error.message : 'Não foi possível salvar a pesagem. Verifique as permissões e tente novamente.';
         });
       }
     }
@@ -132,7 +132,9 @@ class _ConfirmationDialogState extends State<_ConfirmationDialog> {
                                   WeightSource.cameraOcr
                               ? 'PESO MANUAL • leitura realizada pela câmera'
                               : 'PESO MANUAL • informado pelo operador'
-                        : 'PESO AUTOMÁTICO • indicador desconectado',
+                        : preview.indicatorSource == null
+                        ? 'PESO AUTOMÁTICO • indicador desconectado'
+                        : 'PESO BRUTO • ${preview.indicatorSource}',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 14,
@@ -154,6 +156,11 @@ class _ConfirmationDialogState extends State<_ConfirmationDialog> {
                   if (preview.isManual)
                     Text(
                       'Justificativa: ${preview.manualJustification ?? '-'}',
+                    ),
+                  if (preview.indicatorSource != null &&
+                      preview.capturedAt != null)
+                    Text(
+                      'Capturado às ${TimeOfDay.fromDateTime(preview.capturedAt!.toLocal()).format(context)}',
                     ),
                 ],
               ),
@@ -218,9 +225,11 @@ class _ConfirmationDialogState extends State<_ConfirmationDialog> {
                 key: const ValueKey('weighing-confirmation-error'),
                 style: const TextStyle(color: Colors.red),
               ),
-            const Text(
-              'Simulação local • sem gravação definitiva.',
-              style: TextStyle(fontSize: 13, color: AppColors.muted),
+            Text(
+              preview.indicatorSource == null
+                  ? 'Simulação local • sem gravação definitiva.'
+                  : 'Confirmação local desta sessão.',
+              style: const TextStyle(fontSize: 13, color: AppColors.muted),
             ),
           ],
         ),

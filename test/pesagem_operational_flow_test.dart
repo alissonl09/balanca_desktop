@@ -103,6 +103,51 @@ void windowsTestWidgets(String name, WidgetTesterCallback callback) =>
 
 void main() {
   windowsTestWidgets(
+    'Diferença da nota fiscal usa o líquido confirmado e acompanha o campo',
+    (tester) async {
+      await render(tester);
+      final invoiceInput = input(invoiceWeightField);
+      final difference = find.byKey(
+        const ValueKey('invoice-weight-difference'),
+      );
+      await tester.enterText(invoiceInput, '4.650,50');
+      await tester.pump();
+      expect(difference, findsNothing);
+
+      await manualRead(tester, '17000,1');
+      expect(difference, findsNothing);
+      await manualRead(tester, '12345,1');
+
+      void expectDifference(String value, Color color) {
+        final text = tester.widget<Text>(difference).textSpan! as TextSpan;
+        final amount = text.children!.last as TextSpan;
+        expect(amount.text, value);
+        expect(amount.style!.color, color);
+      }
+
+      expectDifference('+4,5 Kg', const Color(0xff0755a5));
+      tester.view.physicalSize = const Size(1024, 768);
+      await tester.pumpAndSettle();
+      expectDifference('+4,5 Kg', const Color(0xff0755a5));
+
+      await tester.enterText(invoiceInput, '4.660');
+      await tester.pump();
+      expectDifference('-5 Kg', const Color(0xffb42318));
+
+      await tester.enterText(invoiceInput, '4655');
+      await tester.pump();
+      expectDifference('0 Kg', const Color(0xff343a40));
+
+      for (final missingValue in ['', '1.2,3']) {
+        await tester.enterText(invoiceInput, missingValue);
+        await tester.pump();
+        expect(difference, findsNothing);
+      }
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  windowsTestWidgets(
     'resposta HTTP preenche campos reais, bloqueia duplicação e muda unidade',
     (tester) async {
       final settings = SettingsState()

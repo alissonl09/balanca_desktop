@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  for (final width in [1000.0, 600.0]) {
+  for (final width in [1000.0, 600.0, 480.0, 280.0]) {
     testWidgets('barra de ações distribui cinco botões em largura $width', (
       tester,
     ) async {
@@ -38,9 +38,12 @@ void main() {
       final first = tester.getRect(buttons[0]);
       final third = tester.getRect(buttons[2]);
       final last = tester.getRect(buttons[4]);
-      if (width >= 810) {
+      if (width >= 600) {
         expect(first.top, third.top);
         expect(first.top, last.top);
+      } else if (width >= 480) {
+        expect(first.top, third.top);
+        expect(last.top, greaterThan(third.top));
       } else {
         expect(third.top, greaterThan(first.top));
         expect(last.top, greaterThan(third.top));

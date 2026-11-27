@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/theme/app_colors.dart';
+import '../../core/indicators/serial_indicator_service.dart';
 import '../../core/widgets/visual_components.dart';
 import '../../core/widgets/read_only_value_field.dart';
 import '../ticket/ticket_session.dart';
@@ -20,6 +22,9 @@ import '../../core/offline/pre_ticket_source.dart';
 import '../configuracoes/settings_models.dart';
 import '../ticket/ticket_mapper.dart';
 import '../ticket/ticket_preview.dart';
+import '../ticket/printer_service.dart';
+import '../ticket/ticket_pesagem.dart';
+import '../ticket/ticket_print_renderer.dart';
 import 'operation_lookup.dart';
 import 'pre_ticket_service.dart';
 import '../../core/libra/libra_api_client.dart';
@@ -60,9 +65,9 @@ class _PesagemPageState extends State<PesagemPage> {
   late final _actionDispatcher =
       widget.actionDispatcher ?? PesagemActionDispatcher();
   late final _settings = widget.settings ?? SettingsState();
+  final _messenger = GlobalKey<ScaffoldMessengerState>();
   late final _operationalChanges = Listenable.merge([
     _settings,
-    _settings.indicatorState,
     _settings.permissions,
   ]);
   void _refreshOperationalSettings() {
@@ -89,7 +94,7 @@ class _PesagemPageState extends State<PesagemPage> {
     'Destino',
     'Tipo do documento',
     'Nº Nota(s) / Documento(s)',
-    'Peso N.F. (Kg)',
+    invoiceWeightField,
     'Embalagem',
     'Operador',
     'Observação',
@@ -98,6 +103,11 @@ class _PesagemPageState extends State<PesagemPage> {
     for (final label in _operationFields)
       label: label == 'Observação' ? _observation : TextEditingController(),
   };
+  late final _invoiceWeightInput = _operationControllers[invoiceWeightField]!;
+  late final _weightPanelChanges = Listenable.merge([
+    _settings.indicatorState,
+    _invoiceWeightInput,
+  ]);
   final _trailerFocus = FocusNode(debugLabel: 'Carreta');
   final _operationFocus = <String, FocusNode>{
     for (final label in _operationFields) label: FocusNode(debugLabel: label),
@@ -113,6 +123,7 @@ class _PesagemPageState extends State<PesagemPage> {
             ));
   late final _editService = widget.editService ?? MemoryPesagemEditService();
   bool _actionModalOpen = false, _saving = false, _lookingUp = false;
+  bool _ticketPrinting = false;
   int _lookupGeneration = 0;
   Map<String, String> get _draft => {
     ...?_ticketSession.current?.operation,
@@ -199,6 +210,7 @@ class _PesagemPageState extends State<PesagemPage> {
       currentWeight: _ticketSession.current?.currentWeight ?? 0,
       summary: _summary,
       capturedAt: _ticketSession.current?.capturedAt,
+      indicatorSource: _ticketSession.current?.indicatorSource,
       manualOperator: _ticketSession.current?.manualOperator,
       manualJustification: _ticketSession.current?.manualJustification,
       manualEvidence: _ticketSession.current?.manualEvidence,
@@ -236,7 +248,10 @@ class _PesagemPageState extends State<PesagemPage> {
           _settings.permissions.allows(AppPermission.reprintTicket),
   };
 
-  Future<void> _runAction(PesagemAction action) async {
+  Future<void> _runAction(
+    PesagemAction action, {
+    bool alternative = false,
+  }) async {
     if (!_actionEnabled(action)) return;
     if (_weighingFlowOpen ||
         _actionModalOpen ||
@@ -266,17 +281,181 @@ class _PesagemPageState extends State<PesagemPage> {
           if (mounted) setState(() => _saving = false);
         }
       case PesagemAction.imprimir:
-        _actionModalOpen = true;
-        try {
-          await showTicketPreview(
-            context,
-            ticket: ticketFromSession(_ticketSession, _settings),
-            format: PrinterFormat.ticket,
-          );
-        } finally {
-          _actionModalOpen = false;
+        final printing = _settings.savedPrinting;
+        if (printing.simulated) {
+          _actionModalOpen = true;
+          try {
+            await showTicketPreview(
+              context,
+              ticket: ticketFromSession(_ticketSession, _settings),
+              format: printing.preferred,
+            );
+          } finally {
+            _actionModalOpen = false;
+          }
+          return;
         }
+        final ticket =
+            _ticketSession.printableStation == _settings.indicatorStationId
+            ? _ticketSession.printableTicket
+            : null;
+        if (ticket == null) {
+          _message('Confirme uma pesagem para imprimir o ticket.');
+          return;
+        }
+        await _printTicket(ticket, printing, alternative: alternative);
     }
+  }
+
+  Future<void> _printTicket(
+    TicketPesagem ticket,
+    PrintSettings printing, {
+    bool alternative = false,
+    bool? automaticClosing,
+  }) async {
+    if (_ticketPrinting || _settings.printerService.busy) {
+      _message(
+        'Já há um trabalho de impressão em processamento. Use F5 para tentar depois.',
+        replaceQueued: true,
+      );
+      return;
+    }
+    final preferred = printing.preferred;
+    final alternate = preferred.alternative;
+    Future<PrintResult> send(PrinterFormat format, PrintSettings settings) {
+      _message('Preparando ticket para ${format.label}…', replaceQueued: true);
+      return _settings.printerService.print(
+        settings: settings,
+        format: format,
+        document: () => PrintDocument.ticket(ticket),
+        ticketId: ticket.ticketNumber,
+        canSubmit: automaticClosing == null
+            ? null
+            : () {
+                final effective = _automaticPrinting(
+                  ticket,
+                  closing: automaticClosing,
+                );
+                final destination = effective?.destination(format);
+                return destination?.configured == true &&
+                    destination!.queue == settings.destination(format).queue;
+              },
+      );
+    }
+
+    setState(() => _ticketPrinting = true);
+    try {
+      final format = alternative ? alternate : preferred;
+      final result = await send(format, printing);
+      if (!mounted) return;
+      if (alternative ||
+          !result.canOfferAlternative ||
+          (automaticClosing != null &&
+              _automaticPrinting(ticket, closing: automaticClosing) == null) ||
+          !printing.destination(alternate).configured ||
+          !identical(ticket, _ticketSession.printableTicket) ||
+          _actionModalOpen ||
+          _weighingFlowOpen ||
+          ModalRoute.of(context)?.isCurrent != true) {
+        _message('${format.label} · ${result.message}', replaceQueued: true);
+        return;
+      }
+      _actionModalOpen = true;
+      bool? useAlternative;
+      try {
+        useAlternative = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('${format.label} indisponível'),
+            content: Text(
+              '${result.message}\n\nEnviar para ${printing.destination(alternate).queue}?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text('Imprimir em ${alternate.label}'),
+              ),
+            ],
+          ),
+        );
+      } finally {
+        _actionModalOpen = false;
+      }
+      if (mounted &&
+          useAlternative == true &&
+          _actionEnabled(PesagemAction.imprimir) &&
+          identical(ticket, _ticketSession.printableTicket)) {
+        final effective = automaticClosing == null
+            ? printing
+            : _automaticPrinting(ticket, closing: automaticClosing);
+        if (effective == null ||
+            !effective.destination(alternate).configured ||
+            effective.destination(alternate).queue !=
+                printing.destination(alternate).queue) {
+          return;
+        }
+        final alternativeResult = await send(alternate, effective);
+        if (mounted) {
+          _message(
+            '${alternate.label} · ${alternativeResult.message}',
+            replaceQueued: true,
+          );
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _ticketPrinting = false);
+    }
+  }
+
+  PrintSettings? _automaticPrinting(
+    TicketPesagem ticket, {
+    required bool closing,
+  }) {
+    if (!mounted) return null;
+    final printing = _settings.savedPrinting;
+    if (_settings.printSettingsLoadFailed ||
+        printing.simulated ||
+        !printing.printsAutomatically(closing: closing) ||
+        !_settings.printing.printsAutomatically(closing: closing) ||
+        !_settings.permissions.allows(AppPermission.printTicket) ||
+        _ticketSession.printableStation != _settings.indicatorStationId ||
+        _ticketSession.phase !=
+            (closing ? WeighingPhase.fechada : WeighingPhase.aberta) ||
+        !identical(ticket, _ticketSession.printableTicket) ||
+        !PrinterFormat.values.any(
+          (format) => printing.destination(format).enabled,
+        )) {
+      return null;
+    }
+    return printing;
+  }
+
+  Widget? get _alternativePrint {
+    if (!_actionEnabled(PesagemAction.imprimir)) return null;
+    final printing = _settings.savedPrinting;
+    final alternative = printing.preferred.alternative;
+    if (printing.simulated || !printing.destination(alternative).configured) {
+      return null;
+    }
+    return PopupMenuButton<PrinterFormat>(
+      key: const ValueKey('pesagem-alternative-print'),
+      tooltip: 'Outro destino de impressão',
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 130),
+      icon: const Icon(Icons.arrow_drop_down, size: 18),
+      enabled: !_ticketPrinting && !_settings.printerService.busy,
+      onSelected: (_) => _runAction(PesagemAction.imprimir, alternative: true),
+      itemBuilder: (_) => [
+        PopupMenuItem(
+          value: alternative,
+          child: Text('Imprimir em ${alternative.label}'),
+        ),
+      ],
+    );
   }
 
   Future<void> _startWeighing({bool manual = false}) async {
@@ -286,12 +465,30 @@ class _PesagemPageState extends State<PesagemPage> {
       _message('Inicie uma nova pesagem para registrar outra captura.');
       return;
     }
+    final phaseAtCapture = _ticketSession.phase;
+    final summaryAtCapture = _summary;
+    final closing = phaseAtCapture == WeighingPhase.aberta;
+    final plate = normalizePlate(_plate.text);
+    final openPlate =
+        _ticketSession.openWeighingPlate ??
+        _foundPlate ??
+        _ticketSession.confirmed?.plate;
+    if (closing &&
+        openPlate != null &&
+        openPlate.isNotEmpty &&
+        openPlate != plate) {
+      _message('Use a placa $openPlate para fechar a pesagem aberta.');
+      return;
+    }
+    final stationAtCapture = _settings.indicatorStationId;
     _weighingFlowOpen = true;
+    TicketPesagem? confirmedTicket;
     try {
       ManualAuthorization? authorization;
       ManualWeighingEvidence? evidence;
       DateTime? capturedAt;
-      double weight = 0; // Indicador atual desconectado, sem leitura real.
+      SerialCapture? serialCapture;
+      double weight = 0;
       if (manual) {
         authorization = await showManualAuthentication(
           context,
@@ -310,27 +507,66 @@ class _PesagemPageState extends State<PesagemPage> {
           context,
           authorization: authorization,
           services: _settings.manualCapture,
-          plate: normalizePlate(_plate.text),
+          plate: plate,
         );
         if (!mounted || evidence == null) return;
         weight = evidence.finalWeight!;
         capturedAt = evidence.dateTime;
+      } else if (_settings.serialIndicator.realMode) {
+        try {
+          serialCapture = _settings.serialIndicator.capture();
+        } on FormatException catch (error) {
+          _message(error.message);
+          return;
+        }
+        weight = serialCapture.reading.wholeKg!.toDouble();
+        capturedAt = serialCapture.reading.readAt;
+      }
+      final WeighingSummary? confirmedSummary;
+      if (capturedAt == null || !weight.isFinite || weight <= 0) {
+        confirmedSummary = null;
+      } else if (closing) {
+        final first = summaryAtCapture.first;
+        confirmedSummary = WeighingSummary(
+          first: first,
+          firstWeighedAt: summaryAtCapture.firstWeighedAt,
+          second: weight,
+          secondWeighedAt: capturedAt,
+          net: first.isFinite && first > 0
+              ? double.parse((first - weight).abs().toStringAsFixed(3))
+              : null,
+        );
+      } else {
+        confirmedSummary = WeighingSummary(
+          first: weight,
+          firstWeighedAt: capturedAt,
+        );
       }
       final preview = WeighingPreview(
-        plate: normalizePlate(_plate.text),
+        plate: plate,
         trailer: normalizePlate(_trailer.text),
         operation: _draft,
         currentWeight: weight,
-        summary: _summary,
+        summary: closing
+            ? confirmedSummary ?? summaryAtCapture
+            : summaryAtCapture,
         manualOperator: authorization?.user,
         manualJustification: authorization?.justification,
         capturedAt: capturedAt,
+        indicatorSource: serialCapture?.reading.source,
         manualEvidence: evidence,
       );
-      await showWeighingConfirmation(
+      final confirmed = await showWeighingConfirmation(
         context,
         preview,
         onSave: () {
+          if (serialCapture != null &&
+              !_settings.serialIndicator.canConfirm(serialCapture)) {
+            throw const FormatException(
+              'A comunicação ou a configuração do indicador mudou durante a confirmação. '
+              'Cancele e faça uma nova captura.',
+            );
+          }
           if (!_actionEnabled(
             manual ? PesagemAction.manual : PesagemAction.pesar,
           )) {
@@ -343,27 +579,24 @@ class _PesagemPageState extends State<PesagemPage> {
               )) {
             throw StateError('Permissão de pesagem indisponível.');
           }
+          if (confirmedSummary != null &&
+              (_settings.indicatorStationId != stationAtCapture ||
+                  normalizePlate(_plate.text) != preview.plate ||
+                  _ticketSession.phase != phaseAtCapture ||
+                  !identical(_summary, summaryAtCapture))) {
+            throw const FormatException(
+              'Os dados da pesagem mudaram durante a confirmação. '
+              'Cancele e faça uma nova captura.',
+            );
+          }
           setState(() {
             _lastConfirmedPreview = preview;
-            // Só a confirmação de captura válida altera o ciclo. Salvar dados não.
-            if (capturedAt != null && weight > 0) {
-              if (_ticketSession.phase == WeighingPhase.nova) {
-                _summary = WeighingSummary(
-                  first: weight,
-                  firstWeighedAt: capturedAt,
-                );
-                _ticketSession.phase = WeighingPhase.aberta;
-              } else {
-                _summary = WeighingSummary(
-                  first: _summary.first,
-                  firstWeighedAt: _summary.firstWeighedAt,
-                  second: weight,
-                  secondWeighedAt: capturedAt,
-                  net: _summary.net,
-                  dry: _summary.dry,
-                );
-                _ticketSession.phase = WeighingPhase.fechada;
-              }
+            if (confirmedSummary != null) {
+              _summary = confirmedSummary;
+              _ticketSession.phase = closing
+                  ? WeighingPhase.fechada
+                  : WeighingPhase.aberta;
+              _ticketSession.openWeighingPlate = closing ? null : plate;
             }
           });
           // Um indicador desconectado não substitui uma captura manual existente.
@@ -372,14 +605,37 @@ class _PesagemPageState extends State<PesagemPage> {
             _ticketSession.confirmed = preview;
           }
           _publishTicketData(commitOperation: true);
+          if (confirmedSummary != null &&
+              !(_lookupService is DemoOperationLookupService &&
+                  _foundPlate != null)) {
+            final printing = _settings.savedPrinting;
+            final ticket = ticketFromSession(
+              _ticketSession,
+              _settings,
+              savedPrinting: printing,
+            );
+            _ticketSession.printableTicket = ticket;
+            _ticketSession.printableStation = _settings.indicatorStationId;
+            confirmedTicket = ticket;
+          }
           _message(
-            'Pesagem de ${formatWeight(_lastConfirmedPreview!.currentWeight)} Kg confirmada em simulação local. '
-            '${manual ? 'Auditoria da captura salva localmente. Nenhuma integração foi acionada.' : 'Nenhum dado foi persistido.'}',
+            serialCapture == null
+                ? 'Pesagem de ${formatWeight(_lastConfirmedPreview!.currentWeight)} Kg confirmada em simulação local. '
+                      '${manual ? 'Auditoria da captura salva localmente. Nenhuma integração foi acionada.' : 'Nenhum dado foi persistido.'}'
+                : 'Pesagem de ${formatWeight(weight)} Kg confirmada nesta sessão.',
           );
         },
       );
+      if (confirmed != true) confirmedTicket = null;
     } finally {
       _weighingFlowOpen = false;
+    }
+    final ticket = confirmedTicket;
+    if (mounted && ticket != null) {
+      final printing = _automaticPrinting(ticket, closing: closing);
+      if (printing != null) {
+        unawaited(_printTicket(ticket, printing, automaticClosing: closing));
+      }
     }
   }
 
@@ -441,6 +697,8 @@ class _PesagemPageState extends State<PesagemPage> {
           }
           _summary = result.summary;
           _ticketSession.phase = result.phase;
+          _ticketSession.openWeighingPlate =
+              result.phase == WeighingPhase.aberta ? plate : null;
         }
         // Sem integração, conserva os valores manuais; nunca preenche exemplos.
       });
@@ -473,10 +731,14 @@ class _PesagemPageState extends State<PesagemPage> {
     }
   }
 
-  void _message(String text) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(text)));
+  void _message(String text, {bool replaceQueued = false}) {
+    final messenger = _messenger.currentState;
+    if (replaceQueued) {
+      messenger?.clearSnackBars();
+    } else {
+      messenger?.hideCurrentSnackBar();
+    }
+    messenger?.showSnackBar(SnackBar(content: Text(text)));
   }
 
   void _clearLookup() {
@@ -489,6 +751,7 @@ class _PesagemPageState extends State<PesagemPage> {
       _trailers = [];
       _ticketSession.current = null;
       _ticketSession.phase = WeighingPhase.nova;
+      _ticketSession.openWeighingPlate = null;
       _summary = const WeighingSummary();
       _plate.clear();
       _trailer.clear();
@@ -503,7 +766,7 @@ class _PesagemPageState extends State<PesagemPage> {
       _ticketSession.clearConfirmation();
     });
     _publishTicketData();
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    _messenger.currentState?.hideCurrentSnackBar();
     _plateFocus.requestFocus();
   }
 
@@ -537,101 +800,139 @@ class _PesagemPageState extends State<PesagemPage> {
             constraints.biggest,
             localNotice: widget.station?.activeWeighing != null,
           );
-          // Abaixo da largura mínima operacional, conserva-se a legibilidade com
-          // rolagem apenas horizontal. Não se empilham os painéis verticalmente.
-          final width = math.max(
-            1120.0,
-            math.min(constraints.maxWidth, 1600.0),
+          final width = math.min(constraints.maxWidth, 1600.0);
+          const minimumFormWidth = 570.0;
+          final minimumContentWidth =
+              minimumFormWidth + layout.gap + layout.sideWidth;
+          final narrow = width < minimumContentWidth;
+          final side = _sidePanel(layout);
+          final form = SingleChildScrollView(
+            key: const ValueKey('pesagem-main-scroll'),
+            child: _mainContent(layout),
           );
-          final content = SizedBox(
-            width: width,
-            height: constraints.maxHeight,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: SingleChildScrollView(
-                    key: const ValueKey('pesagem-main-scroll'),
-                    child: _mainCard(layout),
-                  ),
-                ),
-                SizedBox(width: layout.gap),
-                SizedBox(
-                  width: layout.sideWidth,
-                  child: PesagemSidePanel(
-                    layout: layout,
-                    integratedSgv: _settings.integratedSgv,
-                    accessControl: _settings.integratedSgv
-                        ? AccessControlPanel(
-                            state: _settings.accessControl,
-                            gates: _settings.barriers,
-                            trafficLights: _settings.trafficLight,
-                            display: _settings.informationDisplay,
-                            entryEquipmentId: _settings.entryBarrierId,
-                            exitEquipmentId: _settings.exitBarrierId,
-                            equipmentSource: _settings.gateEquipmentSource,
-                            displayMessage: _settings.displayMessage,
-                            simulationEnabled:
-                                kDebugMode ||
-                                _settings.environment ==
-                                    StationEnvironment.desenvolvimento,
-                          )
-                        : null,
-                  ),
-                ),
-              ],
-            ),
+          Widget columns(Widget content) => Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: content),
+              SizedBox(width: layout.gap),
+              side,
+            ],
           );
           return Align(
             alignment: Alignment.topCenter,
-            child: constraints.maxWidth < width
-                ? SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: content,
-                  )
-                : content,
+            child: SizedBox(
+              width: width,
+              height: constraints.maxHeight,
+              child: narrow
+                  ? _mainCard(
+                      layout,
+                      SingleChildScrollView(
+                        key: const ValueKey('pesagem-content-horizontal'),
+                        scrollDirection: Axis.horizontal,
+                        child: SizedBox(
+                          width: minimumContentWidth,
+                          child: columns(form),
+                        ),
+                      ),
+                    )
+                  : columns(_mainCard(layout, form)),
+            ),
           );
         },
       ),
     ),
   );
 
-  Widget _mainCard(PesagemLayout layout) => VisualCard(
-    key: const ValueKey('pesagem-main-card'),
-    radius: 14,
-    shadow: true,
-    padding: EdgeInsets.all(layout.cardPadding),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _title(layout),
-        SizedBox(height: layout.gap),
-        _search(layout),
-        SizedBox(height: layout.gap),
-        _operation(layout),
-        SizedBox(height: layout.gap),
-        WeightPanels(
-          layout: layout,
-          summary: _summary,
-          reading: _settings.indicatorState.reading,
-        ),
-        SizedBox(height: layout.gap),
-        PesagemActionBar(
-          layout: layout,
-          actions: {
-            for (final action in PesagemAction.values)
-              action: !_actionEnabled(action)
-                  ? null
-                  : () => _actionDispatcher.invoke(action),
-          },
-        ),
-      ],
+  Widget _sidePanel(PesagemLayout layout) => SizedBox(
+    width: layout.sideWidth,
+    child: PesagemSidePanel(
+      layout: layout,
+      integratedSgv: _settings.integratedSgv,
+      accessControl: _settings.integratedSgv
+          ? AccessControlPanel(
+              state: _settings.accessControl,
+              gates: _settings.barriers,
+              trafficLights: _settings.trafficLight,
+              display: _settings.informationDisplay,
+              entryEquipmentId: _settings.entryBarrierId,
+              exitEquipmentId: _settings.exitBarrierId,
+              equipmentSource: _settings.gateEquipmentSource,
+              displayMessage: _settings.displayMessage,
+              simulationEnabled:
+                  kDebugMode ||
+                  _settings.environment == StationEnvironment.desenvolvimento,
+            )
+          : null,
     ),
   );
 
+  Widget _mainCard(PesagemLayout layout, Widget content) => VisualCard(
+    key: const ValueKey('pesagem-main-card'),
+    radius: 14,
+    shadow: true,
+    padding: EdgeInsets.symmetric(
+      horizontal: layout.cardPadding,
+      vertical: layout.shortHeight ? 2 : layout.cardPadding,
+    ),
+    child: ScaffoldMessenger(
+      key: _messenger,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: content,
+        bottomNavigationBar: Padding(
+          padding: EdgeInsets.only(top: layout.verticalGap),
+          child: ListenableBuilder(
+            listenable: Listenable.merge([
+              _settings.indicatorState,
+              _settings.printerService,
+            ]),
+            builder: (_, _) => PesagemActionBar(
+              layout: layout,
+              alternativePrint: _alternativePrint,
+              actions: {
+                for (final action in PesagemAction.values)
+                  action:
+                      !_actionEnabled(action) ||
+                          (action == PesagemAction.imprimir &&
+                              (_ticketPrinting ||
+                                  _settings.printerService.busy))
+                      ? null
+                      : () => _actionDispatcher.invoke(action),
+              },
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget _mainContent(PesagemLayout layout) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _title(layout),
+      SizedBox(height: layout.verticalGap),
+      _search(layout),
+      SizedBox(height: layout.verticalGap),
+      _operation(layout),
+      SizedBox(height: layout.verticalGap),
+      ListenableBuilder(
+        listenable: _weightPanelChanges,
+        builder: (_, _) => WeightPanels(
+          layout: layout,
+          summary: _summary,
+          reading: _settings.indicatorState.reading,
+          invoiceWeight: parseInvoiceWeight(
+            _ticketSession.officialOperation[invoiceWeightField] ??
+                _invoiceWeightInput.text,
+            decimalPoint: _ticketSession.invoiceWeightUsesDecimalPoint,
+          ),
+        ),
+      ),
+    ],
+  );
+
   Widget _title(PesagemLayout layout) => Container(
-    padding: EdgeInsets.only(bottom: layout.compact ? 4 : 10),
+    padding: EdgeInsets.only(bottom: layout.tightHeight ? 2 : 6),
     decoration: const BoxDecoration(
       border: Border(bottom: BorderSide(color: AppColors.border)),
     ),
@@ -648,14 +949,10 @@ class _PesagemPageState extends State<PesagemPage> {
         ),
         SizedBox(width: layout.gap),
         Container(
-          width: layout.compact ? 148 : 180,
+          width: layout.shortHeight ? 126 : (layout.compact ? 148 : 180),
           padding: EdgeInsets.symmetric(
             horizontal: 14,
-            vertical: layout.spacious
-                ? 12
-                : layout.compact
-                ? 4
-                : 6,
+            vertical: layout.shortHeight ? 2 : (layout.spacious ? 8 : 4),
           ),
           decoration: BoxDecoration(
             color: Colors.white,
@@ -712,7 +1009,6 @@ class _PesagemPageState extends State<PesagemPage> {
     ValueChanged<String>? onSubmitted,
     Widget? suffixIcon,
     bool? isDense,
-    double? fieldHeight,
     String? displayLabel,
   }) => FocusTraversalOrder(
     order: NumericFocusOrder(
@@ -735,98 +1031,94 @@ class _PesagemPageState extends State<PesagemPage> {
       suffixIcon: suffixIcon,
       isDense: isDense,
       compact: !layout.spacious,
-      fieldHeight: fieldHeight ?? layout.fieldHeight,
+      fieldHeight: layout.fieldHeight,
       labelGap: layout.labelGap,
     ),
   );
 
-  Widget _sectionTitle(String title, PesagemLayout layout) => Padding(
-    padding: EdgeInsets.only(bottom: layout.compact ? 6 : 10),
-    child: Text(
-      title,
-      style: const TextStyle(
-        color: AppColors.green,
-        fontSize: 18,
-        fontWeight: FontWeight.bold,
+  Widget _searchSection(String title, Widget field) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        title,
+        style: const TextStyle(
+          color: AppColors.green,
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+        ),
       ),
-    ),
+      const SizedBox(height: 4),
+      SizedBox(width: _plateFieldWidth, child: field),
+    ],
   );
 
-  Widget _search(PesagemLayout layout) => VisualCard(
-    padding: EdgeInsets.all(layout.sectionPadding),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: layout.compact ? 240 : 260,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _sectionTitle('Consultar placa', layout),
-              SizedBox(
-                width: _plateFieldWidth,
-                child: _field(
-                  layout,
-                  'Placa',
-                  hint: 'Ex.: ABC1D23',
-                  controller: _plate,
-                  maxLength: 8,
-                  focusNode: _plateFocus,
-                  readOnly: _foundPlate != null,
-                  onSubmitted: (_) => _lookup(),
-                  suffixIcon: ExcludeFocus(
-                    child: IconButton(
-                      tooltip: _foundPlate == null
-                          ? 'Consultar placa'
-                          : 'Limpar consulta',
-                      iconSize: 20,
-                      color: _foundPlate == null
-                          ? AppColors.green
-                          : AppColors.muted,
-                      icon: _lookingUp
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                semanticsLabel: 'Consultando Libra',
-                              ),
-                            )
-                          : Icon(
-                              _foundPlate == null
-                                  ? Icons.search
-                                  : Icons.cleaning_services_outlined,
-                            ),
-                      onPressed: _lookingUp
-                          ? null
-                          : () => _foundPlate == null
-                                ? _lookup()
-                                : _clearLookup(),
+  Widget _search(PesagemLayout layout) {
+    final plate = _searchSection(
+      'Consultar placa',
+      _field(
+        layout,
+        'Placa',
+        hint: 'Ex.: ABC1D23',
+        controller: _plate,
+        maxLength: 8,
+        focusNode: _plateFocus,
+        readOnly: _foundPlate != null,
+        onSubmitted: (_) => _lookup(),
+        suffixIcon: ExcludeFocus(
+          child: IconButton(
+            tooltip: _foundPlate == null
+                ? 'Consultar placa'
+                : 'Limpar consulta',
+            iconSize: 20,
+            color: _foundPlate == null ? AppColors.green : AppColors.muted,
+            icon: _lookingUp
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      semanticsLabel: 'Consultando Libra',
                     ),
+                  )
+                : Icon(
+                    _foundPlate == null
+                        ? Icons.search
+                        : Icons.cleaning_services_outlined,
                   ),
-                ),
+            onPressed: _lookingUp
+                ? null
+                : () => _foundPlate == null ? _lookup() : _clearLookup(),
+          ),
+        ),
+      ),
+    );
+    return VisualCard(
+      padding: EdgeInsets.symmetric(
+        horizontal: layout.sectionPadding,
+        vertical: layout.shortHeight
+            ? 2
+            : (layout.tightHeight ? 3 : (layout.spacious ? 10 : 6)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: layout.compact ? 240 : 260, child: plate),
+          Expanded(
+            child: Container(
+              padding: EdgeInsets.only(left: layout.spacious ? 24 : 14),
+              decoration: const BoxDecoration(
+                border: Border(left: BorderSide(color: Color(0xffd7dfdc))),
               ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: Container(
-            padding: EdgeInsets.only(left: layout.spacious ? 24 : 14),
-            decoration: const BoxDecoration(
-              border: Border(left: BorderSide(color: Color(0xffd7dfdc))),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _sectionTitle('Composição do veículo', layout),
-                SizedBox(width: _plateFieldWidth, child: _trailerField(layout)),
-              ],
+              child: _searchSection(
+                'Composição do veículo',
+                _trailerField(layout),
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 
   Widget _trailerField(PesagemLayout layout) {
     if (_trailers.length < 2) {
@@ -881,17 +1173,33 @@ class _PesagemPageState extends State<PesagemPage> {
   }
 
   Widget _operation(PesagemLayout layout) {
+    const title = Text(
+      'Dados da Operação',
+      style: TextStyle(
+        fontSize: 17,
+        color: AppColors.heading,
+        fontWeight: FontWeight.bold,
+      ),
+    );
+    const subtitle = Text(
+      'Informações da operação de pesagem.',
+      style: TextStyle(fontSize: 13, color: AppColors.muted),
+    );
+    final iconSize = layout.tightHeight ? 26.0 : (layout.compact ? 30.0 : 38.0);
     return VisualCard(
       key: const ValueKey('pesagem-operation-card'),
-      padding: EdgeInsets.all(layout.operationPadding),
+      padding: EdgeInsets.symmetric(
+        horizontal: layout.sectionPadding,
+        vertical: layout.operationVerticalPadding,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
               Container(
-                width: layout.compact ? 30 : 38,
-                height: layout.compact ? 30 : 38,
+                width: iconSize,
+                height: iconSize,
                 decoration: const BoxDecoration(
                   color: AppColors.paleGreen,
                   shape: BoxShape.circle,
@@ -899,25 +1207,17 @@ class _PesagemPageState extends State<PesagemPage> {
                 child: const Center(child: AppAsset('truck', size: 22)),
               ),
               const SizedBox(width: 10),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Dados da Operação',
-                      style: TextStyle(
-                        fontSize: 17,
-                        color: AppColors.heading,
-                        fontWeight: FontWeight.bold,
+              Expanded(
+                child: layout.tightHeight
+                    ? const Wrap(
+                        spacing: 10,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [title, subtitle],
+                      )
+                    : const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [title, SizedBox(height: 3), subtitle],
                       ),
-                    ),
-                    SizedBox(height: 3),
-                    Text(
-                      'Informações da operação de pesagem.',
-                      style: TextStyle(fontSize: 13, color: AppColors.muted),
-                    ),
-                  ],
-                ),
               ),
             ],
           ),
@@ -949,7 +1249,7 @@ class _PesagemPageState extends State<PesagemPage> {
                 children: [
                   SizedBox(
                     width: 120,
-                    child: _operationValue(layout, 'Peso N.F. (Kg)'),
+                    child: _operationValue(layout, invoiceWeightField),
                   ),
                   SizedBox(width: layout.spacious ? 16 : 12),
                   Expanded(child: _operationValue(layout, 'Embalagem')),
@@ -979,7 +1279,7 @@ class _PesagemPageState extends State<PesagemPage> {
         child: ReadOnlyValueField(
           label: displayLabel,
           value: _ticketSession.officialOperation[label]!,
-          height: layout.operationFieldHeight,
+          height: layout.fieldHeight,
           labelGap: layout.labelGap,
         ),
       );
@@ -993,7 +1293,6 @@ class _PesagemPageState extends State<PesagemPage> {
       disabled: label == 'Operador',
       future: label == 'Operador',
       hint: label == 'Operador' ? 'Integração futura' : null,
-      fieldHeight: layout.operationFieldHeight,
     );
   }
 

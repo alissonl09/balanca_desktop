@@ -1,72 +1,91 @@
-# Cadastros: interface e estado temporário
+# Cadastros
 
-Remetentes / Destinatários, Transportadoras, Motoristas e Placas compartilham
-pesquisa por código/nome, seleção visual, listagem com rolagem interna e ações
-Inserir, Alterar e Excluir. Placas também pesquisa por placa e nome da
-transportadora. Pesquisa é aplicada pela lupa ou ENTER; filtro vazio mostra todos.
-Operações, Itens / Produtos e Unidades permanecem provisórios.
+Os cadastros compartilham pesquisa, seleção visual, rolagem interna e ações
+de manutenção. A lupa ou Enter aplica o filtro. Unidades continua provisório.
 
-## Organização do código
+## Origem dos registros
 
-- `cadastro_record.dart`: tipos de apresentação, Tipo (Cliente / Fornecedor),
-  Vínculo (Autônomo / Transportadora) e valores dos formulários.
-- `cadastros_memory.dart`: dados mock e mutações exclusivamente em memória.
-  Não é repository, não acessa arquivos ou banco e não representa contratos reais.
-- `cadastro_panel.dart`: pesquisa, seleção, ações e confirmação de exclusão.
-- `cadastro_form.dart`: mesmo formulário para inclusão/alteração, campos comuns
-  de endereço, lista fixa de 27 UFs, validações e normalização da placa.
-- `carrier_selection_field.dart`: seleção pesquisável de transportadora existente,
-  compartilhada por Motoristas e Placas. Guarda o código, não um nome livre.
+A aba abre em modo real e consulta somente registros oficiais que tenham sido
+disponibilizados à aplicação. A versão atual não tem uma fonte de consulta
+cadastral conectada. A Libra fornece pré-tickets que podem trazer o nome do
+motorista e dados da operação. Esses valores são exibidos na pesagem e não
+identificam registros oficiais de motoristas ou veículos.
 
-O shell mantém uma única instância do estado de demonstração durante a sessão.
-Navegar entre páginas ou abas conserva os registros. Reiniciar a aplicação
-restaura os exemplos; nada é persistido ou enviado à Libra-API.
+O controle **Modo simulado** habilita explicitamente a demonstração. Ela usa
+outra instância em memória, com exemplos fictícios, e conserva as alterações
+durante a sessão. Voltar ao modo real exibe apenas a origem oficial. Encerrar o
+aplicativo descarta a sessão simulada.
 
-## Fluxos
+## Motoristas
 
-Inserir abre um rascunho com o próximo código somente leitura. A sequência é
-inicializada em máximo existente + 1, separadamente por cadastro, e avança apenas
-ao salvar. Cancelar não consome código. Exclusão não retrocede a sequência.
-Futuramente o identificador deverá vir da persistência real.
+A tabela apresenta matrícula, nome, cidade e UF. A busca usa matrícula ou nome.
+Um clique seleciona a linha e um duplo clique abre o formulário em consulta.
+Inserir e Alterar abrem o mesmo formulário em manutenção quando autorizados.
 
-Alterar abre uma cópia dos valores. Cancelar descarta o rascunho. Salvar aplica os
-valores em memória, preserva o código e destaca o registro salvo na lista.
-Excluir exige confirmação com Código - Nome/Placa e botão destrutivo vermelho.
-Alterar/Excluir só ficam disponíveis com um registro selecionado e visível no filtro.
+O formulário mostra os dados pessoais à esquerda e as placas vinculadas à
+direita quando houver largura. Em janelas menores, a lista de placas fica
+abaixo dos campos. O nome completo é obrigatório. Endereço, número, complemento,
+cidade, UF, CEP e observações são opcionais. O vínculo preexistente com
+transportadora continua disponível. A consulta preserva valores legados de UF.
+O CPF fica fora do cadastro de motoristas e do escopo da integração.
 
-Motorista autônomo não exige transportadora. Ao trocar para Autônomo, a seleção
-anterior é limpa. Vínculo Transportadora exibe e exige seleção de registro existente.
-Placas sempre exige essa seleção. O seletor usa os dados atuais de Transportadoras,
-incluindo inclusões e alterações feitas na mesma sessão.
+A matrícula é um texto somente leitura e é independente do identificador do
+registro. Matrículas iniciadas por `SIM-` pertencem aos exemplos e à numeração
+temporária da demonstração. O contrato central definirá a matrícula oficial.
 
-Não há regra definitiva de exclusão de transportadora nem exclusão em cascata.
-Referências a uma transportadora excluída são sinalizadas como indisponíveis na
-interface; ao editar um cadastro que exige o vínculo, é necessário selecionar uma
-transportadora existente. A política definitiva de integridade fica pendente.
+O seletor de placas usa veículos cadastrados. Aceita os formatos brasileiros
+antigo e Mercosul, seguindo a normalização existente. O vínculo usa o ID do
+veículo e impede repetições da mesma placa no motorista. Veículos podem aparecer
+em mais de um motorista. Incluir ou remover um vínculo altera o rascunho do
+formulário. Salvar aplica o rascunho completo. Cancelar pede confirmação se
+houver alterações. Remover um vínculo preserva o registro do veículo. Se um
+veículo vinculado sair do catálogo simulado, a referência permanece indicada
+como indisponível.
 
-Placa aceita os formatos brasileiros antigo/Mercosul com sete caracteres; normaliza
-maiúsculas e remove espaços/separadores. Número de endereço é texto. CEP e
-CPF/CNPJ possuem indicação visual de formato, sem validação fiscal ou máscara
-que modifique o documento. Observação é livre e multilinha.
+## Catálogos XBAL
 
-Os modais mantêm título e ações fixos. O conteúdo rola internamente quando necessário;
-em larguras menores, as linhas do formulário se reorganizam sem reduzir as fontes.
+- **Itens / Produtos** classifica materiais para a balança, incluindo Sacaria.
+  A fonte central prevista é `XCXP_BAL_ITEM`.
+- **Operações** representa os roteiros (`XCXP_BAL_ROTEIRO`), com dados gerais,
+  tolerância associada e informações complementares associadas. A natureza do
+  roteiro é independente da primeira ou da segunda leitura.
+- **Regras de Tolerância** separa os parâmetros da operação e distingue a
+  dispensa explícita, o zero e a ausência de referência. Usar regra padrão
+  com BAG ou GRANEL é inválido. Referências incompletas geram pendência.
+- **Informações Complementares** define os sete tipos reutilizáveis. Cada
+  associação pertence a um roteiro e pode filtrar produto ou acondicionamento.
+  O protótipo sinaliza conflitos de contexto sem escolher precedência.
 
-## Exemplos mock
+Os códigos `SIM-` dos quatro catálogos identificam dados da demonstração. A
+inativação nessa fonte preserva o registro e suas referências.
 
-- Remetentes / Destinatários: Fazenda Boa Vista (Fornecedor) e Comercial de Café
-  Horizonte (Cliente).
-- Transportadoras: Transportadora Horizonte, Cargas Serra Azul e Transportes Vale
-  do Café.
-- Motoristas: João da Silva (Autônomo) e Maria Oliveira (vinculada à Horizonte).
-- Placas: ABC1D23 (Horizonte) e DEF4G56 (Serra Azul).
+## Permissões e manutenção
 
-Não são usados documentos fiscais reais.
+As ações usam `PermissionState`. Cada categoria implementada exige a permissão
+geral de consulta e a consulta da categoria. Inserir, alterar e excluir exigem,
+além da consulta, a permissão geral da ação e a permissão correspondente da
+categoria. Mudar vínculos de placa exige uma autorização própria. Adicionar
+uma placa também exige consulta ao cadastro de placas.
 
-## Integração futura
+Na matriz inicial, Master e Administrador têm manutenção. Supervisor, Líder e
+Operador têm consulta cadastral. As permissões podem ser configuradas na matriz
+existente. Uma ação sem a concessão necessária é bloqueada pelo serviço e fica
+desabilitada na interface.
 
-Ainda dependem de definição: armazenamento e identificadores reais, carregamento e
-pesquisa paginada, contratos de inclusão/alteração/exclusão, tratamento de erros,
-concorrência e integridade de vínculos. Modelos, formulários e seleção retornam valores
-separados do estado mock para permitir substituir essa fonte. Nenhum endpoint,
-banco, autenticação, sincronização ou integração com ERP foi implementado.
+Manutenção oficial, inclusive offline, fica indisponível mesmo para um perfil
+autorizado. A exclusão exige confirmação e só opera na demonstração. Não há
+persistência local dos cadastros oficiais nem exclusão de pesagens pelo cadastro.
+
+## Integração central pendente
+
+- Origem e atribuição da matrícula oficial, identificadores estáveis de motorista
+  e veículo e representação dos vínculos.
+- Fonte de consulta, critérios de busca, sincronização e disponibilidade de
+  registros oficiais para consulta em cada unidade.
+- Campos obrigatórios, validações e tratamento de valores legados.
+- Contratos para as operações de manutenção e os vínculos, com validação de
+  permissões no servidor e tratamento de concorrência.
+- Política de inativação ou exclusão, integridade de referências e auditoria.
+- Cache SQLite cadastral, revisão dos 21 roteiros, metadados centrais dos
+  atributos e precedência completa de exceções. A coleta na pesagem e a
+  apresentação no ticket dependem de regras e layouts homologados.

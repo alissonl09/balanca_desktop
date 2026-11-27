@@ -19,7 +19,9 @@ void main() {
         ind570().connectionTypes,
         containsAll(IndicatorConnectionType.values),
       );
-      for (final model in models.skip(1)) {
+      expect(models[1].connectionTypes, [IndicatorConnectionType.serial]);
+      expect(models[1].protocols, contains(toledoContinuousProtocol));
+      for (final model in models.skip(2)) {
         expect(model.connectionTypes, isEmpty);
         expect(model.protocols, isEmpty);
       }
@@ -86,24 +88,31 @@ void main() {
     expect(custom.serial!.baudRates, [2400]);
     expect(() => config.addModel(custom), throwsArgumentError);
   });
-  test(
-    'troca de modelo limpa parâmetros incompatíveis e não preenche valores',
-    () {
-      final item = IndicatorInstallation(id: '1')
-        ..baudRate = 4800
-        ..parity = 'Even'
-        ..dataBits = 7
-        ..tcpPort = 1701
-        ..protocol = 'MT Continuous / Continuous Output';
-      item.selectModel(initialIndicatorModels()[1]);
-      expect(item.modelCode, 'IND560');
-      expect(item.baudRate, isNull);
-      expect(item.parity, isNull);
-      expect(item.connectionType, isNull);
-      expect(item.protocol, isNull);
-      expect(item.tcpPort, isNull);
-    },
-  );
+  test('troca para Toledo preenche o perfil serial sem escolher porta ou transporte', () {
+    final item = IndicatorInstallation(id: '1')
+      ..baudRate = 9600
+      ..parity = 'Odd'
+      ..dataBits = 8
+      ..tcpPort = 1701
+      ..protocol = 'MT Continuous / Continuous Output';
+    item.selectModel(initialIndicatorModels()[1]);
+    expect(item.modelCode, 'IND560');
+    expect(item.baudRate, 4800);
+    expect(item.parity, 'Even');
+    expect(item.dataBits, 7);
+    expect(item.stopBits, 2);
+    expect(item.flowControl, 'None');
+    expect(item.checksum, isTrue);
+    expect(item.windowsPort, isNull);
+    expect(item.connectionType, isNull);
+    expect(item.protocol, isNull);
+    expect(item.tcpPort, isNull);
+    item.selectConnectionType(
+      IndicatorConnectionType.serial,
+      initialIndicatorModels()[1],
+    );
+    expect(item.protocol, toledoContinuousProtocol);
+  });
   test(
     'TCP aceita porta física diferente de 1701 e valida faixa e timeout',
     () {
@@ -191,20 +200,32 @@ void main() {
         AppPermission.editOpen,
       ]),
     );
-    expect(p.profile(3).grants, {
-      AppPermission.weigh,
-      AppPermission.releaseDivergence,
-      AppPermission.reprintTicket,
-    });
+    expect(
+      p.profile(3).grants.where((grant) => grant.group != 'Cadastros'),
+      unorderedEquals([
+        AppPermission.weigh,
+        AppPermission.releaseDivergence,
+        AppPermission.reprintTicket,
+      ]),
+    );
     expect(p.profile(3).allows(AppPermission.authorizeManual), isFalse);
     expect(p.profile(3).allows(AppPermission.cancelTicket), isFalse);
   });
-  test('Operador tem somente operação e reimpressão inicialmente', () {
+  test('Operador tem operação, reimpressão e consulta cadastral inicial', () {
     final p = PermissionState();
     addTearDown(p.dispose);
     expect(p.profile(4).grants, {
       AppPermission.weigh,
       AppPermission.reprintTicket,
+      AppPermission.readRegistry,
+      AppPermission.readParties,
+      AppPermission.readCarriers,
+      AppPermission.readDrivers,
+      AppPermission.readPlates,
+      AppPermission.readItems,
+      AppPermission.readOperations,
+      AppPermission.readTolerances,
+      AppPermission.readAttributes,
     });
   });
   test('matriz permite parametrizar defaults e Master permanece total', () {

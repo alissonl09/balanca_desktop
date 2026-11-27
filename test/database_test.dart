@@ -80,6 +80,32 @@ void main() {
     },
   );
 
+  test(
+    'diagnóstico consulta o banco em uso e não inicializa outro arquivo',
+    () async {
+      final path = p.join(root.path, 'outro', 'balanca.db');
+      final unopened = DatabaseManager(path: path);
+      expect(await unopened.status(), {'available': false, 'path': path});
+      expect(await Directory(p.dirname(path)).exists(), isFalse);
+
+      await SqlitePesagemStore(manager).save(weighing('diagnostico'));
+      final records = await manager.loadWeighings();
+      final history = await manager.history();
+      final status = await manager.status();
+      expect(status['available'], isTrue);
+      expect(status['path'], manager.path);
+      expect(status['pending'], 1);
+      expect(status['integrity'], isNull);
+      expect(await manager.loadWeighings(), records);
+      expect(await manager.history(), history);
+
+      await manager.close();
+      manager = await open();
+      expect(await manager.loadWeighings(), records);
+      expect((await manager.status())['path'], status['path']);
+    },
+  );
+
   test('migration pendente aplica em ordem e registra versão/hash', () async {
     await manager.close();
     manager = await open(

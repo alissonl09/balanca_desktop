@@ -131,13 +131,30 @@ void main() {
       );
       await tap(tester, keyed('save-settings'));
       expect(
-        find.textContaining('Configurações mantidas somente nesta sessão.'),
+        find.textContaining('Configuração de indicadores salva nesta estação.'),
         findsOneWidget,
       );
       expect(settings.indicators.installations.single.tcpPort, 1702);
       await select(tester, 'indicator-connection', 'Serial RS232');
       expect(keyed('indicator-host'), findsNothing);
       expect(keyed('indicator-com'), findsOneWidget);
+      for (final key in [
+        'indicator-channel',
+        'indicator-interface-null',
+        'indicator-timeout',
+        'indicator-reconnect',
+        'indicator-protocol',
+        'indicator-serial-preset',
+      ]) {
+        expect(keyed(key), findsNothing);
+      }
+      final item = settings.indicators.installations.single;
+      expect(item.baudRate, 4800);
+      expect(item.dataBits, 7);
+      expect(item.parity, 'Even');
+      expect(item.stopBits, 2);
+      expect(item.flowControl, 'None');
+      expect(item.checksum, isTrue);
       expect(options<int>(tester, 'indicator-baud'), [
         300,
         600,
@@ -157,6 +174,7 @@ void main() {
         'Even',
       ]);
       expect(options<String>(tester, 'indicator-flow'), ['None', 'XON/XOFF']);
+      await tap(tester, keyed('indicator-serial-advanced'));
       await select(tester, 'indicator-channel', 'COM2');
       expect(options<String>(tester, 'indicator-interface-COM2'), ['RS-232']);
       expect(options<int>(tester, 'indicator-stop-bits'), [1, 2]);
@@ -173,7 +191,7 @@ void main() {
   );
 
   windowsTest(
-    'troca de modelo altera opções e IND560 não recebe regras do IND570',
+    'troca de modelo carrega as capacidades seriais próprias do IND560',
     (tester) async {
       final settings = SettingsState();
       addTearDown(settings.dispose);
@@ -200,24 +218,24 @@ void main() {
       ]);
       await select(tester, 'indicator-connection', 'Serial RS232');
       expect(options<int>(tester, 'indicator-baud'), [2400]);
+      expect(keyed('indicator-protocol'), findsNothing);
+      await tap(tester, keyed('indicator-serial-advanced'));
       expect(options<String>(tester, 'indicator-protocol'), [
         'Saída específica',
       ]);
       await select(tester, 'indicator-model', 'Mettler Toledo IND560');
-      expect(
-        tester
-            .widget<DropdownButtonFormField<IndicatorConnectionType>>(
-              keyed('indicator-connection'),
-            )
-            .onChanged,
-        isNull,
-      );
+      expect(options<IndicatorConnectionType>(tester, 'indicator-connection'), [
+        IndicatorConnectionType.serial,
+      ]);
       expect(keyed('indicator-baud'), findsNothing);
       expect(keyed('indicator-host'), findsNothing);
-      expect(
-        find.textContaining('Capacidades não confirmadas.'),
-        findsOneWidget,
-      );
+      await select(tester, 'indicator-connection', 'Serial RS232');
+      await tap(tester, keyed('indicator-serial-advanced'));
+      expect(options<String>(tester, 'indicator-channel'), [
+        'COM1',
+        'COM2',
+        'COM3',
+      ]);
     },
   );
 

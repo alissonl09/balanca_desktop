@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../core/libra/libra_settings_store.dart';
@@ -6,9 +8,16 @@ import '../../core/database/database_manager.dart';
 
 import '../../core/indicators/indicator_models.dart';
 import '../../core/indicators/indicator_driver.dart';
+import '../../core/indicators/indicator_settings_store.dart';
+import '../../core/indicators/serial_indicator_service.dart';
 import '../../core/permissions/permission_models.dart';
 import '../access_control/access_control_state.dart';
 import '../pesagem/manual_capture/manual_capture_services.dart';
+import '../ticket/print_settings.dart';
+import '../ticket/printer_service.dart';
+import '../ticket/windows_printer_adapter.dart';
+
+export '../ticket/print_settings.dart';
 
 enum StationEnvironment {
   producao('Produção'),
@@ -26,77 +35,10 @@ class UnitOption {
   String get label => '$code - $description';
 }
 
-enum PrinterFormat {
-  ticket('Ticket/Cupom'),
-  a4('A4');
-
-  const PrinterFormat(this.label);
-  final String label;
-}
-
-enum PrinterStatus {
-  online('Online'),
-  offline('Offline'),
-  unavailable('Indisponível');
-
-  const PrinterStatus(this.label);
-  final String label;
-}
-
-enum PaperOrientation {
-  portrait('Retrato'),
-  landscape('Paisagem');
-
-  const PaperOrientation(this.label);
-  final String label;
-}
-
-enum TicketLogo { standard, demonstration }
-
 /// Posições fixas dos dispositivos na configuração, independentes do papel.
 enum GateSlot { one, two }
 
-class PaperSettings {
-  PaperSettings({
-    required this.size,
-    required this.source,
-    this.orientation = PaperOrientation.portrait,
-  });
-  String size, source;
-  PaperOrientation orientation;
-}
-
-class PrinterOption {
-  const PrinterOption({
-    required this.id,
-    required this.name,
-    required this.status,
-    required this.format,
-    required this.connectionType,
-    required this.connection,
-    required this.sizes,
-    required this.sources,
-  });
-  final String id, name, connectionType, connection;
-  final PrinterStatus status;
-  final PrinterFormat format;
-  final List<String> sizes, sources;
-
-  PaperSettings defaultPaper() =>
-      PaperSettings(size: sizes.first, source: sources.first);
-}
-
-class PrintSettings {
-  String printerId = 'ticket-usb';
-  String fallbackPrinterId = 'a4-usb';
-  final Map<String, PaperSettings> paperByPrinter = {};
-  TicketLogo logo = TicketLogo.standard;
-  bool emitEntry = true, emitExit = true, windowsTicket = false;
-  int copies = 1;
-  String header = '', footer = '';
-}
-
-/// Rascunho local de apresentação, sem persistência ou efeito nas integrações.
+/// Configurações compartilhadas pelas telas da estação.
 class SettingsState extends ChangeNotifier {
   SettingsState({
     GateEquipmentSource? gateEquipmentSource,
@@ -104,17 +46,47 @@ class SettingsState extends ChangeNotifier {
     LibraSettingsStore? libraStore,
     LibraSettingsData? libraSettings,
     LibraAuthSession? libraAuth,
+    this.indicatorStore,
+    IndicatorSettingsData? indicatorSettings,
+    IndicatorTransport Function()? serialTransportFactory,
+    Future<List<String>> Function()? serialPortList,
     this.database,
+    this.printStore,
+    Map<String, Map<String, dynamic>> printStations = const {},
+    PrinterService? printerService,
+    this.printSettingsLoadFailed = false,
   }) : gateEquipmentSource =
            gateEquipmentSource ?? const MockGateEquipmentSource(),
        manualCapture = manualCapture ?? ManualCaptureServices.current,
        libraStore = libraStore ?? MemoryLibraSettingsStore(),
        libra = libraSettings ?? LibraSettingsData(),
-       libraAuth = libraAuth ?? LibraAuthSession() {
+       libraAuth = libraAuth ?? LibraAuthSession(),
+       _indicatorSettings = indicatorSettings ?? const IndicatorSettingsData(),
+       _printStations = Map.of(printStations),
+       _defaultPrintSimulation = printStore == null && printerService == null,
+       _ownsPrinterService = printerService == null,
+       printerService =
+           printerService ??
+           PrinterService(WindowsPrinterAdapter(), log: printStore?.log) {
     environment = StationEnvironment.values.firstWhere(
       (e) => e.name == libra.selectedEnvironment,
       orElse: () => StationEnvironment.homologacao,
     );
+    unitCode = _indicatorSettings.units[environment.name] ?? unitCode;
+    printing = _loadPrintSettings();
+    serialIndicator = SerialIndicatorService(
+      indicatorState,
+      transportFactory: serialTransportFactory,
+      portList: serialPortList,
+    );
+    try {
+      _loadIndicatorModels();
+      _loadIndicatorStation();
+    } catch (_) {
+      _indicatorSettings = const IndicatorSettingsData(loadFailed: true);
+      _loadIndicatorModels();
+      _loadIndicatorStation();
+    }
   }
   final LibraSettingsStore libraStore;
   final LibraSettingsData libra;
@@ -130,6 +102,106 @@ class SettingsState extends ChangeNotifier {
   bool manualWeighingEnabled = true;
   final indicators = IndicatorConfiguration();
   final indicatorState = MemoryIndicatorState();
+  final LocalIndicatorSettingsStore? indicatorStore;
+  IndicatorSettingsData _indicatorSettings;
+  late final SerialIndicatorService serialIndicator;
+  bool _disposed = false;
+  bool get indicatorSettingsLoadFailed => _indicatorSettings.loadFailed;
+  String get indicatorStationId => '${environment.name}/$unitCode';
+
+  void _loadIndicatorModels() {
+    final saved = _indicatorSettings.models;
+    final models = saved == null
+        ? initialIndicatorModels()
+        : saved.map(IndicatorModel.fromJson).toList();
+    indicators.models
+      ..clear()
+      ..addAll(models);
+  }
+
+  void _loadIndicatorStation() {
+    try {
+      indicators.restoreStation(
+        _indicatorSettings.stations[indicatorStationId],
+      );
+    } catch (_) {
+      indicators.restoreStation(null);
+      indicators.mode = IndicatorMode.real;
+      serialIndicator.configure(
+        station: indicatorStationId,
+        mode: IndicatorMode.real,
+        issue: 'Configuração serial desta estação inválida.',
+      );
+      return;
+    }
+    if (_indicatorSettings.loadFailed) indicators.mode = IndicatorMode.real;
+    _applyOperationalIndicator(indicators.mode, indicators.operational);
+  }
+
+  void _applyOperationalIndicator(
+    IndicatorMode mode,
+    IndicatorInstallation? item,
+  ) {
+    String? issue;
+    if (_indicatorSettings.loadFailed) {
+      issue = 'Falha ao carregar a configuração local dos indicadores.';
+    } else if (mode == IndicatorMode.real) {
+      final model = indicators.model(item?.modelCode);
+      if (item == null) {
+        issue = 'Selecione o indicador operacional da estação.';
+      } else if (item.active) {
+        if (model == null) {
+          issue = 'Modelo do indicador operacional indisponível.';
+        } else if (item.connectionType != IndicatorConnectionType.serial) {
+          issue = 'A leitura operacional real requer transporte Serial.';
+        } else {
+          issue = [
+            ...item.validate(model),
+            ?item.serialProtocolError,
+          ].firstOrNull;
+        }
+      }
+    }
+    serialIndicator.configure(
+      station: indicatorStationId,
+      mode: mode,
+      installation: item?.active == true ? item : null,
+      issue: issue,
+    );
+  }
+
+  Future<void> saveIndicatorSettings({required bool catalog}) async {
+    final station = indicatorStationId;
+    final next = IndicatorSettingsData(
+      stations: {
+        ..._indicatorSettings.stations,
+        if (!catalog) station: indicators.stationJson(),
+      },
+      models: catalog
+          ? [for (final model in indicators.models) model.toJson()]
+          : _indicatorSettings.models,
+      units: {
+        ..._indicatorSettings.units,
+        if (!catalog) environment.name: unitCode,
+      },
+      loadFailed: catalog && _indicatorSettings.loadFailed,
+    );
+    await indicatorStore?.save(next);
+    if (_disposed) return;
+    _indicatorSettings = next;
+    // Aplica o snapshot salvo, mesmo se houver alterações ainda em edição.
+    final committed = IndicatorConfiguration();
+    try {
+      committed.restoreStation(next.stations[indicatorStationId]);
+      _applyOperationalIndicator(
+        next.loadFailed ? IndicatorMode.real : committed.mode,
+        committed.operational,
+      );
+    } finally {
+      committed.dispose();
+    }
+  }
+
   final permissions = PermissionState();
   final accessControl = AccessControlState();
   int unitCode = 4;
@@ -198,12 +270,40 @@ class SettingsState extends ChangeNotifier {
 
   String ocrAddress = '', ocrToken = '';
   int? ocrPort;
-  final printing = PrintSettings();
+  final LocalPrintSettingsStore? printStore;
+  final PrinterService printerService;
+  final bool _defaultPrintSimulation, _ownsPrinterService;
+  bool printSettingsLoadFailed;
+  Map<String, Map<String, dynamic>> _printStations;
+  late PrintSettings printing;
+
+  PrintSettings get savedPrinting => _loadPrintSettings();
+
+  PrintSettings _loadPrintSettings() {
+    final stored = _printStations[indicatorStationId];
+    return stored == null
+        ? PrintSettings(simulated: _defaultPrintSimulation)
+        : PrintSettings.fromJson(stored);
+  }
+
+  Future<void> savePrintSettings() async {
+    final next = {..._printStations, indicatorStationId: printing.toJson()};
+    await printStore?.save(next);
+    if (_disposed) return;
+    _printStations = next;
+    printSettingsLoadFailed = false;
+    notifyListeners();
+  }
 
   void update(VoidCallback change) {
+    final previousStation = indicatorStationId;
     final previousEnvironment = environment;
     final previousUrl = libra.environments[environment.name]?.baseUrl;
     change();
+    if (previousStation != indicatorStationId) {
+      _loadIndicatorStation();
+      printing = _loadPrintSettings();
+    }
     if (previousEnvironment != environment ||
         previousUrl != libra.environments[environment.name]?.baseUrl) {
       libraAuth.clear();
@@ -213,6 +313,9 @@ class SettingsState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    if (_ownsPrinterService) printerService.dispose();
+    unawaited(serialIndicator.close());
     libraAuth.clear();
     indicators.dispose();
     indicatorState.dispose();

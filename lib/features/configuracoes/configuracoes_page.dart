@@ -11,6 +11,7 @@ import 'settings_models.dart';
 import 'settings_widgets.dart';
 import '../ticket/ticket_session.dart';
 import 'indicator_settings.dart';
+import '../../core/indicators/indicator_models.dart';
 import 'permissions_settings.dart';
 import 'manual_webcam_settings.dart';
 import 'libra_settings.dart';
@@ -93,12 +94,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
 
   bool _saving = false;
   Future<void> _save() async {
-    if (_saving) return;
+    if (_saving || _tab == _SettingsTab.database) return;
     if (!settings.permissions.allows(_tab.permission)) return;
-    if (_tab == _SettingsTab.database) {
-      _message('As ações de manutenção são aplicadas individualmente.');
-      return;
-    }
     if (!settings.gateAssignmentsValid) {
       _message('Entrada e Saída devem usar cancelas diferentes.');
       return;
@@ -116,8 +113,23 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           return;
         }
       }
+      if (settings.indicators.mode == IndicatorMode.real) {
+        final item = settings.indicators.operational;
+        final issue = switch (item) {
+          null => 'Selecione o indicador operacional da estação.',
+          IndicatorInstallation(active: false) => null,
+          IndicatorInstallation(
+            connectionType: IndicatorConnectionType.serial,
+          ) =>
+            item.serialProtocolError,
+          _ => 'A leitura operacional real requer transporte Serial.',
+        };
+        if (issue != null) {
+          _message(issue);
+          return;
+        }
+      }
     }
-    final copies = settings.printing.copies;
     final invalidOcr =
         settings.integratedSgv &&
         settings.ocr &&
@@ -125,12 +137,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
             settings.ocrPort == null ||
             settings.ocrPort! < 1 ||
             settings.ocrPort! > 65535);
-    if (copies < 1 || copies > 10 || invalidOcr) {
-      setState(
-        () => _tab = copies < 1 || copies > 10
-            ? _SettingsTab.printing
-            : _SettingsTab.vehicles,
-      );
+    if (invalidOcr && _tab != _SettingsTab.printing) {
+      setState(() => _tab = _SettingsTab.vehicles);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _form.currentState?.validate();
       });
@@ -138,6 +146,55 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       return;
     }
     if (!_form.currentState!.validate()) return;
+    if (_tab == _SettingsTab.printing) {
+      final printing = settings.printing;
+      for (final format in PrinterFormat.values) {
+        final destination = printing.destination(format);
+        if (!printing.simulated &&
+            destination.enabled &&
+            (destination.queue == null ||
+                (format == PrinterFormat.ticket &&
+                    destination.paper?.isRoll != true))) {
+          _message('Selecione a fila e o papel de ${format.label}.');
+          return;
+        }
+      }
+      final preferred = printing.destination(printing.preferred);
+      final savedMessage =
+          !printing.simulated && preferred.queue != null && !preferred.enabled
+          ? 'Configuração salva. Ative “Usar na pesagem” em ${printing.preferred.label} para imprimir tickets.'
+          : 'Configuração de impressão salva nesta estação.';
+      setState(() => _saving = true);
+      try {
+        await settings.savePrintSettings();
+        if (mounted) _message(savedMessage);
+      } catch (_) {
+        if (mounted) {
+          _message('Não foi possível salvar a configuração de impressão.');
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+      return;
+    }
+    if (_tab == _SettingsTab.indicators || _tab == _SettingsTab.models) {
+      setState(() => _saving = true);
+      try {
+        await settings.saveIndicatorSettings(
+          catalog: _tab == _SettingsTab.models,
+        );
+        if (mounted) {
+          _message('Configuração de indicadores salva nesta estação.');
+        }
+      } catch (_) {
+        if (mounted) {
+          _message('Não foi possível salvar a configuração dos indicadores.');
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+      return;
+    }
     if (_tab == _SettingsTab.general) {
       setState(() => _saving = true);
       try {
@@ -262,16 +319,21 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                           _SettingsTab.general => _general(),
                           _SettingsTab.vehicles => _vehicles(),
                           _SettingsTab.printing => PrintingSettings(
+                            key: ValueKey(settings.indicatorStationId),
                             settings: settings,
                             ticketSession: widget.ticketSession,
                           ),
                           _SettingsTab.indicators => IndicatorSettings(
+                            key: ValueKey(settings.indicatorStationId),
                             configuration: settings.indicators,
                             models: false,
+                            serialIndicator: settings.serialIndicator,
+                            loadFailed: settings.indicatorSettingsLoadFailed,
                           ),
                           _SettingsTab.models => IndicatorSettings(
                             configuration: settings.indicators,
                             models: true,
+                            serialIndicator: settings.serialIndicator,
                           ),
                           _SettingsTab.permissions => PermissionsSettings(
                             permissions: settings.permissions,
@@ -283,31 +345,33 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         },
                 ),
               ),
-              const SizedBox(height: 16),
-              const Text(
-                'Webcam e integração Libra podem ser salvas nesta estação. As demais configurações permanecem na sessão.',
-                style: TextStyle(fontSize: 12, color: AppColors.muted),
-              ),
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerRight,
-                child: ElevatedButton(
-                  key: const ValueKey('save-settings'),
-                  onPressed:
-                      !_saving && settings.permissions.allows(_tab.permission)
-                      ? _save
-                      : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.green,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 12,
-                    ),
-                  ),
-                  child: const Text('Salvar configurações'),
+              if (_tab != _SettingsTab.database) ...[
+                const SizedBox(height: 16),
+                const Text(
+                  'Webcam, integração Libra, indicadores e impressão podem ser salvos nesta estação. As demais configurações permanecem na sessão.',
+                  style: TextStyle(fontSize: 12, color: AppColors.muted),
                 ),
-              ),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: ElevatedButton(
+                    key: const ValueKey('save-settings'),
+                    onPressed:
+                        !_saving && settings.permissions.allows(_tab.permission)
+                        ? _save
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 12,
+                      ),
+                    ),
+                    child: const Text('Salvar configurações'),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

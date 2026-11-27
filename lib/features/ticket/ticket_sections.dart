@@ -27,10 +27,14 @@ String ticketTime(DateTime value) {
   return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}:${date.second.toString().padLeft(2, '0')}';
 }
 
-List<(String, String)> ticketOperationRows(TicketPesagem ticket) {
-  final rows = <(String, String)>[];
-  void add(String label, String? value) {
-    if (value != null && value.trim().isNotEmpty) rows.add((label, value));
+List<List<(String, String)>> _ticketOperationRows(TicketPesagem ticket) {
+  final rows = <List<(String, String)>>[];
+  void add(String label, String? value, [(String, String?)? beside]) {
+    final row = [
+      for (final (label, value) in [(label, value), ?beside])
+        if (value != null && value.trim().isNotEmpty) (label, value),
+    ];
+    if (row.isNotEmpty) rows.add(row);
   }
 
   add(
@@ -41,15 +45,16 @@ List<(String, String)> ticketOperationRows(TicketPesagem ticket) {
   add('Tipo da Operação', ticket.operationType);
   add('Referência / XFER / OC', ticket.operationReference);
   add('Produto / Item', ticket.product);
-  add('Embalagem / Acondicionamento', ticket.packaging);
-  add(
+  add('Embalagem / Acondicionamento', ticket.packaging, (
     'Quantidade',
     ticket.quantity == null ? null : ticketNumberFormat(ticket.quantity!),
-  );
+  ));
   add('Remetente', ticket.sender);
   add('Destinatário', ticket.recipient);
-  add('Placa Cavalo', ticket.tractorPlate);
-  add('Placa Carreta', ticket.trailerPlate);
+  add('Placa Cavalo', ticket.tractorPlate, (
+    'Placa Carreta',
+    ticket.trailerPlate,
+  ));
   add('Transportador', ticket.carrier);
   add('Motorista', ticket.driver);
   add(
@@ -68,68 +73,113 @@ List<(String, String)> ticketOperationRows(TicketPesagem ticket) {
   return rows;
 }
 
-class TicketHeader extends StatelessWidget {
-  const TicketHeader({super.key, required this.ticket, this.large = false});
+const _ticketRule = BorderSide(color: Colors.black, width: 0.75);
+const _cellPadding = EdgeInsets.symmetric(horizontal: 8, vertical: 4);
+
+class TicketOperationSection extends StatelessWidget {
+  const TicketOperationSection({
+    super.key,
+    required this.ticket,
+    this.large = false,
+  });
+
   final TicketPesagem ticket;
   final bool large;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = _ticketOperationRows(ticket);
+    if (rows.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Dados da Operação',
+          style: TextStyle(
+            fontSize: large ? 17 : 15,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final (index, row) in rows.indexed)
+          Table(
+            border: TableBorder(
+              top: index == 0 ? _ticketRule : BorderSide.none,
+              bottom: _ticketRule,
+              left: _ticketRule,
+              right: _ticketRule,
+              verticalInside: _ticketRule,
+            ),
+            children: [
+              TableRow(
+                children: [
+                  for (final (label, value) in row)
+                    TicketFieldValue(label, value, padding: _cellPadding),
+                ],
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+class TicketHeader extends StatelessWidget {
+  const TicketHeader({
+    super.key,
+    required this.ticket,
+    this.large = false,
+    this.standardLogo,
+  });
+  final TicketPesagem ticket;
+  final bool large;
+  final Widget? standardLogo;
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          if (ticket.branding.logo == TicketLogoKind.standard)
-            AppAsset('logo-topo', size: large ? 90 : 62, color: Colors.black)
-          else
-            Icon(
-              Icons.local_shipping_outlined,
-              size: large ? 90 : 62,
-              color: Colors.black,
-            ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                const Text(
-                  'Ticket Nº',
-                  textAlign: TextAlign.right,
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  ticket.ticketNumber ?? '—',
-                  key: const ValueKey('ticket-number'),
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    fontSize: large ? 28 : 23,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  ticket.isClosing ? 'FECHAMENTO DE PESO' : 'ABERTURA DE PESO',
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
+          TicketPaperLogo(
+            kind: ticket.branding.logo,
+            size: large ? 70 : 62,
+            standardLogo: standardLogo,
           ),
+          const SizedBox(width: 12),
+          if (ticket.branding.companyName case final company?)
+            Expanded(
+              child: Text(
+                company,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: large ? 18 : 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
         ],
       ),
-      if (ticket.branding.companyName case final company?) ...[
-        const SizedBox(height: 8),
-        Text(
-          company,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: large ? 18 : 14,
-            fontWeight: FontWeight.bold,
-          ),
+      const SizedBox(height: 8),
+      const Text(
+        'Ticket Nº',
+        textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+      ),
+      Text(
+        ticket.printableNumber ?? '—',
+        key: const ValueKey('ticket-number'),
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: large ? 28 : 23,
+          fontWeight: FontWeight.bold,
         ),
-      ],
+      ),
+      Text(
+        ticket.isClosing ? 'FECHAMENTO DE PESO' : 'ABERTURA DE PESO',
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+      ),
       if (ticket.branding.unitLabel case final unit?) ...[
         const SizedBox(height: 6),
         Text('Unidade $unit', textAlign: TextAlign.center),
@@ -146,21 +196,53 @@ class TicketHeader extends StatelessWidget {
   );
 }
 
+class TicketPaperLogo extends StatelessWidget {
+  const TicketPaperLogo({
+    super.key,
+    required this.kind,
+    required this.size,
+    this.standardLogo,
+  });
+  final TicketLogoKind kind;
+  final double size;
+  final Widget? standardLogo;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: size,
+    child: kind == TicketLogoKind.standard
+        ? standardLogo ?? AppAsset('logo-topo', size: size, color: Colors.black)
+        : Icon(Icons.local_shipping_outlined, size: size, color: Colors.black),
+  );
+}
+
 class TicketFieldValue extends StatelessWidget {
-  const TicketFieldValue(this.label, this.value, {super.key});
+  const TicketFieldValue(
+    this.label,
+    this.value, {
+    super.key,
+    this.padding = const EdgeInsets.only(bottom: 9),
+    this.labelAlign,
+    this.valueAlign,
+    this.valueStyle,
+  });
   final String label, value;
+  final EdgeInsets padding;
+  final TextAlign? labelAlign, valueAlign;
+  final TextStyle? valueStyle;
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 9),
+    padding: padding,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
           label,
+          textAlign: labelAlign,
           style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 2),
-        Text(value, softWrap: true),
+        Text(value, softWrap: true, textAlign: valueAlign, style: valueStyle),
       ],
     ),
   );
@@ -178,12 +260,12 @@ class TicketWeighingSection extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const Divider(color: Colors.black, height: 24),
+      const SizedBox(height: 10),
       const Text(
         'Dados da Pesagem',
         style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: 8),
       if (ticket.captureType == TicketCaptureType.manual)
         Container(
           key: const ValueKey('ticket-manual-notice'),
@@ -214,85 +296,135 @@ class TicketWeighingSection extends StatelessWidget {
           'BALANÇA / AUTOMÁTICA',
           style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
         ),
-      const SizedBox(height: 12),
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      const SizedBox(height: 8),
+      Table(
+        key: const ValueKey('ticket-weighing-grid'),
+        border: const TableBorder(
+          top: _ticketRule,
+          bottom: _ticketRule,
+          left: _ticketRule,
+          right: _ticketRule,
+          horizontalInside: _ticketRule,
+          verticalInside: _ticketRule,
+        ),
         children: [
-          Expanded(
-            child: _column(
-              'ENTRADA',
-              ticket.firstWeighedAt,
-              ticket.firstWeight,
-              'Peso Inicial',
-            ),
+          const TableRow(
+            children: [_WeighingHeading('ENTRADA'), _WeighingHeading('SAÍDA')],
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: _column(
-              'SAÍDA',
-              ticket.secondWeighedAt,
-              ticket.secondWeight,
-              'Peso Final',
-            ),
+          if (ticket.firstWeighedAt != null ||
+              ticket.secondWeighedAt != null) ...[
+            _timingRow('Data', ticketDate),
+            _timingRow('Hora', ticketTime),
+          ],
+          TableRow(
+            children: [
+              _weightCell('Peso Inicial', ticket.firstWeight),
+              _weightCell('Peso Final', ticket.secondWeight),
+            ],
           ),
         ],
       ),
-      if (ticket.netWeight case final weight?) ...[
-        const Divider(color: Colors.black, height: 24),
+      if (ticket.netWeight case final weight?)
         Container(
           key: const ValueKey('ticket-net-weight'),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          decoration: const BoxDecoration(
+            border: Border(
+              left: _ticketRule,
+              right: _ticketRule,
+              bottom: _ticketRule,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Row(
             children: [
-              const Text(
-                'Peso Líquido',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              const Expanded(
+                flex: 2,
+                child: Text(
+                  'Peso Líquido',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                ticketWeight(weight),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: large ? 30 : 26,
-                  fontWeight: FontWeight.w900,
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 3,
+                child: FittedBox(
+                  alignment: Alignment.centerRight,
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    ticketWeight(weight),
+                    style: TextStyle(
+                      fontSize: large ? 30 : 26,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
                 ),
               ),
             ],
           ),
         ),
-      ],
-      if (ticket.dryWeight case final weight?)
-        TicketFieldValue('Peso Seco', ticketWeight(weight)),
     ],
   );
 
-  Widget _column(
-    String label,
-    DateTime? at,
-    double? weight,
-    String weightLabel,
-  ) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Text(
-        label,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-      ),
-      const SizedBox(height: 8),
-      if (at != null) ...[
-        TicketFieldValue('Data', ticketDate(at)),
-        TicketFieldValue('Hora', ticketTime(at)),
-      ],
-      if (weight != null)
-        TicketFieldValue(weightLabel, ticketWeight(weight))
-      else
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 8),
-          child: Text('—'),
-        ),
-    ],
+  TableRow _timingRow(String label, String Function(DateTime) format) =>
+      TableRow(
+        children: [
+          for (final at in [ticket.firstWeighedAt, ticket.secondWeighedAt])
+            Padding(
+              padding: _cellPadding,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      at == null ? '—' : format(at),
+                      textAlign: TextAlign.right,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      );
+
+  Widget _weightCell(String label, double? weight) => weight == null
+      ? const Padding(
+          padding: _cellPadding,
+          child: Text('—', textAlign: TextAlign.right),
+        )
+      : TicketFieldValue(
+          label,
+          ticketWeight(weight),
+          padding: _cellPadding,
+          valueAlign: TextAlign.right,
+          valueStyle: TextStyle(
+            fontSize: large ? 20 : 16,
+            fontWeight: FontWeight.bold,
+          ),
+        );
+}
+
+class _WeighingHeading extends StatelessWidget {
+  const _WeighingHeading(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: _cellPadding,
+    child: Text(
+      text,
+      textAlign: TextAlign.center,
+      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+    ),
   );
 }
 
@@ -303,14 +435,33 @@ class TicketFooter extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const Divider(color: Colors.black, height: 24),
+      const SizedBox(height: 12),
       if (ticket.observation case final text?)
-        TicketFieldValue('Observações', text),
-      if (ticket.operatorName case final operator?)
-        TicketFieldValue('Operador', operator),
-      TicketFieldValue(
-        'Emissão do comprovante',
-        '${ticketDate(ticket.issuedAt)} ${ticketTime(ticket.issuedAt)}',
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              border: Border.fromBorderSide(_ticketRule),
+            ),
+            child: TicketFieldValue('Observações', text, padding: _cellPadding),
+          ),
+        ),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (ticket.operatorName case final operator?) ...[
+            Expanded(child: TicketFieldValue('Operador', operator)),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: TicketFieldValue(
+              'Emissão do comprovante',
+              '${ticketDate(ticket.issuedAt)} ${ticketTime(ticket.issuedAt)}',
+              labelAlign: TextAlign.right,
+              valueAlign: TextAlign.right,
+            ),
+          ),
+        ],
       ),
       if (ticket.branding.footerLines.isNotEmpty) ...[
         const SizedBox(height: 8),
@@ -319,7 +470,7 @@ class TicketFooter extends StatelessWidget {
           textAlign: TextAlign.center,
         ),
       ],
-      if (ticket.traceabilityId case final code?) ...[
+      if (ticket.printableNumber case final code?) ...[
         const SizedBox(height: 16),
         TicketBarcode(value: code),
       ],

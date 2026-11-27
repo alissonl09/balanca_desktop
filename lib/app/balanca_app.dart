@@ -5,6 +5,9 @@ import 'app_shell.dart';
 import '../features/pesagem/operation_lookup.dart';
 import '../core/libra/libra_settings_store.dart';
 import '../core/database/database_manager.dart';
+import '../core/indicators/indicator_settings_store.dart';
+import '../features/ticket/print_settings.dart';
+import '../features/ticket/printer_service.dart';
 
 class BalancaApp extends StatelessWidget {
   const BalancaApp({
@@ -13,11 +16,23 @@ class BalancaApp extends StatelessWidget {
     this.libraStore,
     this.libraSettings,
     this.database,
+    this.indicatorStore,
+    this.indicatorSettings = const IndicatorSettingsData(),
+    this.printStore,
+    this.printStations = const {},
+    this.printSettingsLoadFailed = false,
+    this.printerService,
   });
   final OperationLookupService? lookupService;
   final LibraSettingsStore? libraStore;
   final LibraSettingsData? libraSettings;
   final DatabaseManager? database;
+  final LocalIndicatorSettingsStore? indicatorStore;
+  final IndicatorSettingsData indicatorSettings;
+  final LocalPrintSettingsStore? printStore;
+  final Map<String, Map<String, dynamic>> printStations;
+  final bool printSettingsLoadFailed;
+  final PrinterService? printerService;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -29,6 +44,12 @@ class BalancaApp extends StatelessWidget {
       libraStore: libraStore,
       libraSettings: libraSettings,
       database: database,
+      indicatorStore: indicatorStore,
+      indicatorSettings: indicatorSettings,
+      printStore: printStore,
+      printStations: printStations,
+      printSettingsLoadFailed: printSettingsLoadFailed,
+      printerService: printerService,
     ),
   );
 }

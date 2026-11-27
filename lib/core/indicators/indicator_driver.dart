@@ -15,6 +15,12 @@ class IndicatorReading {
     this.status = IndicatorConnectionStatus.disconnected,
     this.readAt,
     this.error,
+    this.gross,
+    this.wholeKg,
+    this.decimalPlaces,
+    this.physical = false,
+    this.source,
+    this.recovering = false,
   });
   final double? weight;
   final String unit;
@@ -22,7 +28,18 @@ class IndicatorReading {
   final IndicatorConnectionStatus status;
   final DateTime? readAt;
   final String? error;
+  final bool? gross;
+  final int? wholeKg, decimalPlaces;
+  final bool physical;
+  final bool recovering;
+  final String? source;
   bool get connected => status == IndicatorConnectionStatus.connected;
+  bool get allowsManualContingency =>
+      !connected &&
+      (!physical ||
+          recovering ||
+          (status != IndicatorConnectionStatus.connecting &&
+              status != IndicatorConnectionStatus.awaitingData));
 }
 
 abstract interface class IndicatorTransport {
@@ -70,19 +87,6 @@ class TcpIndicatorTransport implements IndicatorTransport {
     await _socket?.close();
     _socket = null;
   }
-}
-
-/// Placeholder explícito: a porta COM não é aberta até existir uma dependência
-/// suportada/configurada para o Windows. O diagnóstico informa a limitação.
-class UnsupportedSerialTransport implements IndicatorTransport {
-  @override
-  Stream<List<int>> get bytes => const Stream.empty();
-  @override
-  Future<void> connect(IndicatorInstallation installation) => Future.error(
-    UnsupportedError('Transporte Serial Windows não configurado.'),
-  );
-  @override
-  Future<void> disconnect() async {}
 }
 
 abstract interface class IndicatorDriver {
@@ -180,8 +184,36 @@ class MockIndicatorDriver implements IndicatorDriver {
 class MemoryIndicatorState extends ChangeNotifier {
   IndicatorReading _reading = const IndicatorReading();
   IndicatorReading get reading => _reading;
-  void simulate(IndicatorReading value) {
+  void simulate(IndicatorReading value) => publish(value);
+
+  void publish(IndicatorReading value) {
+    final previous = _reading;
     _reading = value;
-    notifyListeners();
+    if ((
+          previous.weight,
+          previous.unit,
+          previous.stable,
+          previous.status,
+          previous.error,
+          previous.gross,
+          previous.physical,
+          previous.source,
+          previous.decimalPlaces,
+          previous.recovering,
+        ) !=
+        (
+          value.weight,
+          value.unit,
+          value.stable,
+          value.status,
+          value.error,
+          value.gross,
+          value.physical,
+          value.source,
+          value.decimalPlaces,
+          value.recovering,
+        )) {
+      notifyListeners();
+    }
   }
 }

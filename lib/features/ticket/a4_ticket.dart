@@ -5,14 +5,21 @@ import 'ticket_sections.dart';
 
 /// Mesmos dados e seções do cupom, reorganizados em uma folha convencional.
 class A4Ticket extends StatelessWidget {
-  const A4Ticket({super.key, required this.ticket});
+  const A4Ticket({
+    super.key,
+    required this.ticket,
+    this.standardLogo,
+    this.fillSheet = true,
+  });
   final TicketPesagem ticket;
+  final Widget? standardLogo;
+  final bool fillSheet;
   @override
   Widget build(BuildContext context) => Container(
     key: const ValueKey('a4-ticket-paper'),
     color: Colors.white,
-    constraints: const BoxConstraints(minHeight: 1018),
-    padding: const EdgeInsets.all(40),
+    constraints: fillSheet ? const BoxConstraints(minHeight: 1018) : null,
+    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
     child: DefaultTextStyle(
       style: const TextStyle(
         fontFamily: 'Arial',
@@ -24,25 +31,8 @@ class A4Ticket extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TicketHeader(ticket: ticket, large: true),
-          const Text(
-            'Dados da Operação',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          LayoutBuilder(
-            builder: (context, constraints) => Wrap(
-              spacing: 24,
-              runSpacing: 4,
-              children: [
-                for (final (label, value) in ticketOperationRows(ticket))
-                  SizedBox(
-                    width: (constraints.maxWidth - 24) / 2,
-                    child: TicketFieldValue(label, value),
-                  ),
-              ],
-            ),
-          ),
+          TicketHeader(ticket: ticket, large: true, standardLogo: standardLogo),
+          TicketOperationSection(ticket: ticket, large: true),
           TicketWeighingSection(ticket: ticket, large: true),
           TicketFooter(ticket: ticket),
         ],

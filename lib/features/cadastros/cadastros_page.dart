@@ -7,19 +7,17 @@ import '../../core/widgets/visual_components.dart';
 import 'cadastro_panel.dart';
 import 'cadastro_record.dart';
 import 'cadastros_memory.dart';
-import '../../core/permissions/permission_models.dart';
 
-/// Cadastros com dados temporários em memória; demais abas ainda provisórias.
 class CadastrosPage extends StatefulWidget {
   const CadastrosPage({
     super.key,
     required this.compact,
     required this.memory,
-    this.permissions,
+    this.onSimulationChanged,
   });
   final bool compact;
   final CadastrosMemory memory;
-  final PermissionState? permissions;
+  final ValueChanged<bool>? onSimulationChanged;
 
   @override
   State<CadastrosPage> createState() => _CadastrosPageState();
@@ -27,16 +25,9 @@ class CadastrosPage extends StatefulWidget {
 
 class _CadastrosPageState extends State<CadastrosPage>
     with SingleTickerProviderStateMixin {
-  static const _tabs = [
-    'Remetentes / Destinatários',
-    'Transportadoras',
-    'Motoristas',
-    'Placas',
-    'Operações',
-    'Itens / Produtos',
-    'Unidades',
-  ];
-  late final _controller = TabController(length: _tabs.length, vsync: this);
+  static const _tabs = [...CadastroKind.values];
+  static const _unitLabel = 'Unidades';
+  late final _controller = TabController(length: _tabs.length + 1, vsync: this);
 
   @override
   void dispose() {
@@ -60,11 +51,28 @@ class _CadastrosPageState extends State<CadastrosPage>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const PageHeading(
-              title: 'Cadastros',
-              subtitle: 'Selecione o cadastro que deseja acessar.',
-              // Ícone Material temporário, até a definição do asset próprio.
-              icon: Icons.badge_outlined,
+            Row(
+              children: [
+                const Expanded(
+                  child: PageHeading(
+                    title: 'Cadastros',
+                    subtitle: 'Selecione o cadastro que deseja acessar.',
+                    icon: Icons.badge_outlined,
+                  ),
+                ),
+                if (widget.onSimulationChanged != null) ...[
+                  const SizedBox(width: 8),
+                  const Flexible(child: Text('Modo simulado')),
+                  Semantics(
+                    label: 'Modo simulado',
+                    child: Switch(
+                      key: const ValueKey('cadastro-simulation'),
+                      value: widget.memory.simulated,
+                      onChanged: widget.onSimulationChanged,
+                    ),
+                  ),
+                ],
+              ],
             ),
             SizedBox(height: widget.compact ? 14 : 22),
             Container(
@@ -102,8 +110,9 @@ class _CadastrosPageState extends State<CadastrosPage>
                     ),
                   ),
                   tabs: [
-                    for (final label in _tabs)
-                      Tab(height: widget.compact ? 38 : 43, text: label),
+                    for (final kind in _tabs)
+                      Tab(height: widget.compact ? 38 : 43, text: kind.label),
+                    Tab(height: widget.compact ? 38 : 43, text: _unitLabel),
                   ],
                 ),
               ),
@@ -114,10 +123,9 @@ class _CadastrosPageState extends State<CadastrosPage>
               builder: (context, _) =>
                   _controller.index < CadastroKind.values.length
                   ? CadastroPanel(
-                      key: ValueKey(CadastroKind.values[_controller.index]),
+                      key: ValueKey((widget.memory, _controller.index)),
                       kind: CadastroKind.values[_controller.index],
                       memory: widget.memory,
-                      permissions: widget.permissions,
                     )
                   : VisualCard(
                       key: const ValueKey('cadastro-placeholder'),
@@ -127,7 +135,7 @@ class _CadastrosPageState extends State<CadastrosPage>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Cadastro de ${_tabs[_controller.index]}',
+                            'Cadastro de $_unitLabel',
                             style: const TextStyle(
                               fontSize: 19,
                               fontWeight: FontWeight.bold,

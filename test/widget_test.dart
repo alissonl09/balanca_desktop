@@ -50,6 +50,176 @@ void main() {
       await fonts.load();
     }
   });
+  Finder keyed(String id) => find.byKey(ValueKey(id));
+  Rect actionBarRect(WidgetTester tester, Size viewport) {
+    final bar = keyed('pesagem-action-bar');
+    final rect = tester.getRect(bar);
+    expect(rect.left, greaterThanOrEqualTo(0));
+    expect(rect.right, lessThanOrEqualTo(viewport.width + .01));
+    expect(rect.bottom, lessThanOrEqualTo(viewport.height + .01));
+    for (final shortcut in ['F5', 'F6', 'F10', 'F11', 'F12']) {
+      final label = find.descendant(of: bar, matching: find.text(shortcut));
+      final button = find.ancestor(
+        of: label,
+        matching: find.byType(TextButton),
+      );
+      expect(button.hitTestable(), findsOneWidget);
+      final bounds = tester.getRect(button);
+      expect(rect.contains(bounds.topLeft), isTrue);
+      expect(rect.contains(bounds.bottomRight), isTrue);
+    }
+    return rect;
+  }
+
+  ScrollPosition positionOf(WidgetTester tester, String key) => tester
+      .state<ScrollableState>(
+        find
+            .descendant(of: keyed(key), matching: find.byType(Scrollable))
+            .first,
+      )
+      .position;
+
+  for (final (size, reservedHeight) in [
+    for (final monitor in [
+      const Size(1280, 720),
+      const Size(1366, 768),
+      const Size(1600, 900),
+      const Size(1920, 1080),
+    ])
+      for (final reserved in [0.0, 56.0]) (monitor, reserved),
+  ]) {
+    for (final scale in [1.0, 1.25]) {
+      for (final access in [false, true]) {
+        testWidgets(
+          'Pesagem preserva campos e ações em $size a $scale, reserva $reservedHeight, acesso $access',
+          (tester) async {
+            tester.view.devicePixelRatio = scale;
+            final client = Size(size.width, size.height - reservedHeight);
+            tester.view.physicalSize = client;
+            addTearDown(tester.view.resetDevicePixelRatio);
+            addTearDown(tester.view.resetPhysicalSize);
+            await tester.pumpWidget(
+              const TickerMode(
+                enabled: false,
+                child: BalancaApp(lookupService: DemoOperationLookupService()),
+              ),
+            );
+            await tester.pumpAndSettle();
+            if (access) {
+              await tester.tap(keyed('menu-config'));
+              await tester.pumpAndSettle();
+              final sgv = keyed('sgv-integration');
+              await tester.ensureVisible(sgv);
+              await tester.tap(sgv);
+              await tester.pumpAndSettle();
+              final vehicles = keyed('settings-tab-vehicles');
+              await tester.ensureVisible(vehicles);
+              await tester.tap(vehicles);
+              await tester.pumpAndSettle();
+              for (final label in [
+                'Cancelas',
+                'Semáforo',
+                'Display de Informações',
+              ]) {
+                final toggle = find.widgetWithText(SwitchListTile, label);
+                await tester.ensureVisible(toggle);
+                await tester.tap(toggle);
+                await tester.pumpAndSettle();
+              }
+              await tester.tap(keyed('menu-balanca_icon'));
+              await tester.pumpAndSettle();
+            }
+
+            expect(
+              keyed('access-control-card'),
+              access ? findsOneWidget : findsNothing,
+            );
+            expect(keyed('pesagem-content-horizontal'), findsNothing);
+            final bar = actionBarRect(tester, client / scale);
+            final form = tester.getRect(keyed('pesagem-main-card'));
+            expect(form.bottom - bar.bottom, inInclusiveRange(0, 18));
+            Finder field(String name) => find.byWidgetPredicate(
+              (widget) => widget is VisualField && widget.label == name,
+            );
+            final driver = field('Motorista');
+            final input = find.descendant(
+              of: driver,
+              matching: find.byType(TextField),
+            );
+            final label = find.descendant(
+              of: driver,
+              matching: find.byType(VisualFieldLabel),
+            );
+            expect(tester.getSize(input).height, greaterThanOrEqualTo(36));
+            expect(
+              tester.getRect(input).top - tester.getRect(label).bottom,
+              greaterThanOrEqualTo(4),
+            );
+            expect(
+              tester.getRect(field('Emissor(es)')).top -
+                  tester.getRect(driver).bottom,
+              greaterThanOrEqualTo(8),
+            );
+
+            final mainScroll = positionOf(tester, 'pesagem-main-scroll');
+            if (client.height / scale >= 720) {
+              expect(mainScroll.maxScrollExtent, 0);
+            }
+            if (client.height / scale < 560) {
+              expect(mainScroll.maxScrollExtent, greaterThan(0));
+            }
+            if (mainScroll.maxScrollExtent > 0) {
+              mainScroll.jumpTo(mainScroll.maxScrollExtent);
+              await tester.pumpAndSettle();
+              expect(actionBarRect(tester, client / scale), bar);
+              expect(
+                tester.getRect(keyed('weight-panels')).bottom,
+                lessThanOrEqualTo(
+                  tester.getRect(keyed('pesagem-main-scroll')).bottom + .01,
+                ),
+              );
+            }
+            expect(positionOf(tester, 'pesagem-side-panel').maxScrollExtent, 0);
+            expect(tester.takeException(), isNull);
+          },
+        );
+      }
+    }
+  }
+
+  testWidgets('Em janela pequena, apenas o conteúdo se desloca', (
+    tester,
+  ) async {
+    const viewport = Size(600, 400);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = viewport;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpWidget(
+      const BalancaApp(lookupService: DemoOperationLookupService()),
+    );
+    await tester.pumpAndSettle();
+
+    final originalBar = actionBarRect(tester, viewport);
+    await tester.tap(find.byTooltip('Consultar placa'));
+    await tester.pumpAndSettle();
+    expect(find.text('Informe uma placa válida.'), findsOneWidget);
+    expect(
+      tester.getRect(find.byType(SnackBar)).bottom,
+      lessThanOrEqualTo(originalBar.top),
+    );
+    expect(actionBarRect(tester, viewport), originalBar);
+    final vertical = positionOf(tester, 'pesagem-main-scroll');
+    expect(vertical.maxScrollExtent, greaterThan(0));
+    vertical.jumpTo(vertical.maxScrollExtent);
+    final horizontal = positionOf(tester, 'pesagem-content-horizontal');
+    expect(horizontal.maxScrollExtent, greaterThan(0));
+    horizontal.jumpTo(horizontal.maxScrollExtent);
+    await tester.pumpAndSettle();
+    expect(actionBarRect(tester, viewport), originalBar);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final size in [
     const Size(1920, 1080),
     const Size(1600, 900),
@@ -150,27 +320,29 @@ void main() {
       expect(cadastrosRect.bottom, lessThanOrEqualTo(size.height));
       final tabBar = find.byKey(const ValueKey('cadastros-tabs'));
       expect(tester.widget<TabBar>(tabBar).isScrollable, isTrue);
-      expect(tester.widget<TabBar>(tabBar).tabs, hasLength(7));
-      for (final label in [
+      const labels = [
         'Remetentes / Destinatários',
         'Transportadoras',
         'Motoristas',
         'Placas',
-        'Operações',
         'Itens / Produtos',
+        'Operações',
+        'Regras de Tolerância',
+        'Informações Complementares',
         'Unidades',
-      ]) {
+      ];
+      expect(
+        tester.widget<TabBar>(tabBar).tabs.cast<Tab>().map((tab) => tab.text),
+        labels,
+      );
+      for (final label in labels) {
         final tab = find.descendant(of: tabBar, matching: find.text(label));
         await tester.ensureVisible(tab);
         await tester.pumpAndSettle();
         await tester.tap(tab);
         await tester.pumpAndSettle();
         expect(find.text('Cadastro de $label'), findsOneWidget);
-        final provisional = [
-          'Operações',
-          'Itens / Produtos',
-          'Unidades',
-        ].contains(label);
+        final provisional = label == 'Unidades';
         expect(
           find.text(
             'Os campos deste cadastro serão definidos em uma próxima etapa.',
@@ -423,12 +595,7 @@ void main() {
     ]) {
       expect(tester.getSize(valueField(label)).width, greaterThan(300));
     }
-    for (final label in [
-      'Pesagem 1',
-      'Pesagem 2',
-      'Peso Líquido',
-      'Peso Seco',
-    ]) {
+    for (final label in ['Pesagem 1', 'Pesagem 2', 'Peso Líquido']) {
       final card = tester.getRect(find.byKey(ValueKey('summary-card-$label')));
       final value = tester.getRect(
         find.byKey(ValueKey('summary-value-$label')),
@@ -437,6 +604,7 @@ void main() {
       expect((value.center.dy - card.center.dy).abs(), lessThan(13));
       expect(value.height, greaterThan(28));
     }
+    expect(find.byKey(const ValueKey('summary-card-Peso Seco')), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -528,13 +696,12 @@ void main() {
     },
   );
 
-  test('Classificação provisória contempla os quatro pesos', () {
+  test('Classificação provisória contempla os três pesos do resumo', () {
     expect(const WeighingSummary().isClosing, isFalse);
     for (final summary in [
       const WeighingSummary(first: 100),
       const WeighingSummary(second: 100),
       const WeighingSummary(net: 100),
-      const WeighingSummary(dry: 100),
     ]) {
       expect(summary.isClosing, isTrue);
     }

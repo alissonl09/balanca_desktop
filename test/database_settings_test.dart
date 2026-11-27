@@ -15,8 +15,11 @@ class _MaintenanceDatabase extends DatabaseManager {
     available = true;
   }
   int backupsCreated = 0, scriptsExecuted = 0, restores = 0;
+  int opens = 0, statusReads = 0, integrityChecks = 0, historyReads = 0;
   List<Map<String, Object?>> seedWeighings = [];
+  List<Map<String, Object?>> seedHistory = [];
   bool failLoading = false;
+  bool failStatus = false;
   @override
   Future<List<Map<String, Object?>>> loadWeighings() async {
     if (failLoading) throw const DatabaseIssue('Falha de leitura local.');
@@ -24,21 +27,33 @@ class _MaintenanceDatabase extends DatabaseManager {
   }
 
   @override
-  Future<Map<String, Object?>> status() async => {
-    'available': available,
-    'path': path,
-    'schema': 1,
-    'sqlite': '3.test',
-    'bytes': 1024 * 1024,
-    'journal': 'wal',
-    'foreignKeys': true,
-    'synchronous': 2,
-    'pending': 3,
-  };
+  Future<void> open() async => opens++;
   @override
-  Future<List<Map<String, Object?>>> history() async => [];
+  Future<Map<String, Object?>> status() async {
+    statusReads++;
+    if (failStatus) throw const DatabaseIssue('Falha de consulta.');
+    return {
+      'available': available,
+      'path': path,
+      'schema': 1,
+      'bytes': 1024 * 1024,
+      'journal': 'wal',
+      'pending': 3,
+    };
+  }
+
   @override
-  Future<List<String>> checkIntegrity() async => ['ok'];
+  Future<List<Map<String, Object?>>> history() async {
+    historyReads++;
+    return seedHistory;
+  }
+
+  @override
+  Future<List<String>> checkIntegrity() async {
+    integrityChecks++;
+    return ['ok'];
+  }
+
   @override
   Future<String> backup() async {
     backupsCreated++;
@@ -86,7 +101,7 @@ void main() {
     WidgetTester tester, {
     String sql = 'CREATE TABLE SUPPORT_TEST(id INTEGER);',
   }) async {
-    tester.view.physicalSize = const Size(1100, 1000);
+    tester.view.physicalSize = const Size(1366, 768);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -120,10 +135,27 @@ void main() {
     tester,
   ) async {
     await mount(tester);
-    expect(find.text('SQLite operacional'), findsOneWidget);
-    expect(find.text('Schema: v1'), findsOneWidget);
-    expect(find.text('Eventos pendentes: 3'), findsOneWidget);
+    expect(find.text('Disponível'), findsOneWidget);
     expect(find.textContaining(database.path), findsOneWidget);
+    expect(tester.widget<SelectableText>(key('path')).data, database.path);
+    expect(key('test-connection').hitTestable(), findsOneWidget);
+    expect(key('backup').hitTestable(), findsOneWidget);
+    expect(key('restore').hitTestable(), findsOneWidget);
+    expect(find.textContaining('Schema v1'), findsNothing);
+    expect(find.textContaining('Eventos pendentes'), findsNothing);
+    expect(key('select-sql'), findsNothing);
+    expect(database.historyReads, 0);
+    await tap(tester, 'test-connection');
+    expect(find.text('Conexão com o banco local verificada.'), findsOneWidget);
+    expect(database.statusReads, 2);
+    expect(database.opens, 0);
+    expect(database.integrityChecks, 0);
+    expect(database.backupsCreated, 0);
+    await tap(tester, 'advanced');
+    expect(find.textContaining('Schema v1'), findsOneWidget);
+    expect(find.textContaining('Journal'), findsNothing);
+    await tap(tester, 'history');
+    expect(database.historyReads, 1);
     await tap(tester, 'integrity');
     expect(find.text('Banco íntegro.'), findsOneWidget);
     await tap(tester, 'backup');
@@ -131,10 +163,107 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('teste de conexão informa falha sem tentar abrir o banco', (
+    tester,
+  ) async {
+    await mount(tester);
+    database.failStatus = true;
+    await tap(tester, 'test-connection');
+    expect(find.text('Indisponível'), findsOneWidget);
+    expect(
+      find.text('Banco local indisponível para consulta.'),
+      findsOneWidget,
+    );
+    expect(find.text('Conexão com o banco local verificada.'), findsNothing);
+    expect(database.opens, 0);
+    expect(database.backupsCreated, 0);
+    expect(tester.widget<OutlinedButton>(key('backup')).onPressed, isNull);
+    database.failStatus = false;
+    database.available = false;
+    await tap(tester, 'test-connection');
+    expect(find.text('Indisponível'), findsOneWidget);
+    expect(database.opens, 0);
+  });
+
+  testWidgets('histórico separa o resultado dos detalhes técnicos', (
+    tester,
+  ) async {
+    database.seedHistory = [
+      {
+        'id': 3,
+        'origin': 'RESTORE',
+        'status': 'SUCCESS',
+        'filename': 'backup.db',
+        'operator': 'suporte',
+        'version_before': 1,
+        'version_after': 2,
+      },
+      {
+        'id': 2,
+        'origin': 'MANUAL',
+        'status': 'FAILED',
+        'filename': 'manutencao.sql',
+        'executed_at': '2026-11-23T14:30:00',
+        'operator': 'alisson',
+        'version_before': 1,
+        'version_after': 1,
+      },
+      {
+        'id': 1,
+        'origin': 'MIGRATION',
+        'status': 'SUCCESS',
+        'filename': 'V001__infraestrutura_e_contingencia',
+        'operator': 'APPLICATION',
+        'version_before': 0,
+        'version_after': 1,
+      },
+      {'id': 0},
+    ];
+    await mount(tester);
+    await tap(tester, 'advanced');
+    await tap(tester, 'history');
+
+    expect(find.text('Concluída'), findsNWidgets(2));
+    expect(find.text('Falhou'), findsOneWidget);
+    expect(find.text('Resultado desconhecido'), findsOneWidget);
+    expect(find.text('Data e hora: 23/11/2026 14:30'), findsOneWidget);
+    expect(find.textContaining('FAILED'), findsNothing);
+    expect(find.textContaining('manutencao.sql'), findsNothing);
+
+    Future<void> expand(String operation) async {
+      final title = find.text(operation);
+      await tester.ensureVisible(title);
+      await tester.pumpAndSettle();
+      await tester.tap(title);
+      await tester.pumpAndSettle();
+    }
+
+    await expand('Execução de script SQL');
+    expect(find.text('Arquivo: manutencao.sql'), findsOneWidget);
+    expect(
+      find.text('Executado por: Alisson Rodrigues Romano (alisson)'),
+      findsOneWidget,
+    );
+    expect(find.text('Estrutura do banco na versão 1.'), findsOneWidget);
+
+    await expand('Restauração de backup');
+    expect(find.text('Executado por: suporte'), findsOneWidget);
+    expect(
+      find.text('Versão do backup: 1. Versão após a restauração: 2.'),
+      findsOneWidget,
+    );
+
+    await expand('Configuração inicial do banco');
+    expect(find.text('Executado por: Aplicativo'), findsOneWidget);
+    expect(find.text('Estrutura do banco criada na versão 1.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('preview de arquivo e confirmação forte antes de executar DDL', (
     tester,
   ) async {
     await mount(tester);
+    await tap(tester, 'advanced');
     await tap(tester, 'select-sql');
     expect(find.text('Arquivo: support.sql'), findsOneWidget);
     expect(find.textContaining('1 comandos'), findsWidgets);
@@ -150,6 +279,7 @@ void main() {
 
   testWidgets('script bloqueado não oferece execução', (tester) async {
     await mount(tester, sql: 'DROP TABLE BAL_PESAGEM;');
+    await tap(tester, 'advanced');
     await tap(tester, 'select-sql');
     expect(find.textContaining('Operação bloqueada:'), findsOneWidget);
     expect(key('apply-sql'), findsNothing);
@@ -161,7 +291,9 @@ void main() {
   ) async {
     permissions.currentUserId = 'carlos';
     await mount(tester);
+    await tap(tester, 'advanced');
     for (final name in [
+      'test-connection',
       'backup',
       'restore',
       'select-sql',
@@ -170,6 +302,22 @@ void main() {
     ]) {
       expect(tester.widget<OutlinedButton>(key(name)).onPressed, isNull);
     }
+  });
+
+  testWidgets('restauração revalida a permissão após a confirmação', (
+    tester,
+  ) async {
+    await mount(tester);
+    await tap(tester, 'restore');
+    await tester.tap(find.text('balanca_20261123143500.db'));
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.enterText(key('confirm-phrase'), 'RESTAURAR');
+    await tester.pump();
+    permissions.setGrant(1, AppPermission.restoreDatabase, false);
+    await tester.tap(key('confirm'));
+    await tester.pumpAndSettle();
+    expect(database.restores, 0);
+    expect(find.text('Sem permissão para esta operação.'), findsOneWidget);
   });
 
   testWidgets('restauração mostra metadados e exige RESTAURAR', (tester) async {
@@ -227,6 +375,40 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Offline · 1 pendências'), findsOneWidget);
+  });
+
+  testWidgets('aba Banco de Dados usa ações próprias em 1366 por 768', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1366, 768);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      BalancaApp(
+        database: database,
+        lookupService: const DemoOperationLookupService(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('menu-config')));
+    await tester.pumpAndSettle();
+    final tab = find.byKey(const ValueKey('settings-tab-database'));
+    await tester.ensureVisible(tab);
+    await tester.pumpAndSettle();
+    await tester.tap(tab);
+    await tester.pumpAndSettle();
+    expect(key('test-connection').hitTestable(), findsOneWidget);
+    expect(key('backup').hitTestable(), findsOneWidget);
+    expect(key('restore').hitTestable(), findsOneWidget);
+    expect(find.byKey(const ValueKey('save-settings')), findsNothing);
+    expect(tester.takeException(), isNull);
+    final general = find.byKey(const ValueKey('settings-tab-general'));
+    await tester.ensureVisible(general);
+    await tester.pumpAndSettle();
+    await tester.tap(general);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('save-settings')), findsOneWidget);
   });
 
   testWidgets('falha de leitura durável não libera pesagem em memória', (

@@ -5,8 +5,9 @@ import 'ticket_sections.dart';
 
 /// Cupom estreito, altura livre e texto integral, sem truncar informações.
 class ThermalTicket extends StatelessWidget {
-  const ThermalTicket({super.key, required this.ticket});
+  const ThermalTicket({super.key, required this.ticket, this.standardLogo});
   final TicketPesagem ticket;
+  final Widget? standardLogo;
   @override
   Widget build(BuildContext context) => Container(
     key: const ValueKey('thermal-ticket-paper'),
@@ -23,14 +24,8 @@ class ThermalTicket extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TicketHeader(ticket: ticket),
-          const Text(
-            'Dados da Operação',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 12),
-          for (final (label, value) in ticketOperationRows(ticket))
-            TicketFieldValue(label, value),
+          TicketHeader(ticket: ticket, standardLogo: standardLogo),
+          TicketOperationSection(ticket: ticket),
           TicketWeighingSection(ticket: ticket),
           TicketFooter(ticket: ticket),
         ],

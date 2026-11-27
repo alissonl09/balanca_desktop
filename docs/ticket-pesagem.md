@@ -72,12 +72,17 @@ Cancelar o fluxo não confirma dados novos. Tudo permanece somente em memória.
 O térmico tem largura de prévia de 340 pixels lógicos; o A4 usa 720. Textos crescem
 em altura, sem reticências ou redução de fonte para esconder informações.
 Entrada e Saída compartilham data, hora e peso; o líquido tem destaque maior e Kg
-associado. Peso Seco, Observações e Operador aparecem apenas quando disponíveis.
+associado. Observações e Operador aparecem quando disponíveis. Tickets legados
+podem conservar o campo serializado de peso seco para compatibilidade.
 Emissão do comprovante usa seu próprio instante, separado da captura.
 
-O A4 é uma preparação visual para contingência, não um documento paginado enviado
-ao Windows. Conteúdo extenso pode aumentar a altura da prévia; paginação física,
-margens reais e capacidades do equipamento serão tratados na futura impressão.
+A estação define independentemente a impressão após a abertura e após o
+fechamento. Desativar uma opção interrompe o envio automático na sessão. Salvar
+mantém a mudança ao reiniciar e aplica novas ativações. F5 envia manualmente o
+ticket confirmado, com as permissões e o destino da estação.
+
+O A4 e o cupom usam os dados do mesmo ticket. Para imprimir, a estação usa a
+fila, o papel e a quantidade de vias definidos para cada destino.
 
 A janela oferece Estado atual da aplicação por padrão. Exemplos de Abertura,
 Fechamento e Manual exigem seleção explícita e exibem aviso **EXEMPLO SIMULADO**.

@@ -16,7 +16,8 @@ class PesagemLayout {
   final DesktopDensity density;
   final double availableHeight;
   final bool localNotice;
-  bool get tightHeight => availableHeight < 620;
+  bool get tightHeight => availableHeight < 660;
+  bool get shortHeight => availableHeight < 610;
   bool get compact => density == DesktopDensity.compacto;
   bool get spacious => density == DesktopDensity.amplo;
   double get cardPadding => spacious
@@ -33,39 +34,17 @@ class PesagemLayout {
       ? 14
       : compact
       ? 4
-      : 10;
-  double get fieldGap => spacious
-      ? 10
-      : compact
-      ? 4
       : 8;
-  double get fieldHeight => spacious
-      ? 40
-      : compact
-      ? 34
-      : 36;
-  double get operationFieldHeight => fieldHeight;
-  double get operationRowGap => tightHeight
-      ? fieldGap
-      : spacious
-      ? 12
-      : compact
-      ? 8
-      : 10;
-  double get operationPadding => tightHeight
-      ? sectionPadding
-      : spacious
-      ? 16
-      : compact
-      ? 11
-      : 12;
-  double get operationHeadingGap =>
-      tightHeight ? (compact ? 6 : 10) : (compact ? 9 : 12);
-  double get labelGap => compact ? 3 : 4;
+  double get verticalGap => shortHeight ? 2 : gap;
+  double get fieldHeight => spacious ? 40 : (compact ? 36 : 38);
+  double get operationRowGap => spacious ? 10 : 8;
+  double get operationVerticalPadding => spacious ? 12 : (tightHeight ? 6 : 8);
+  double get operationHeadingGap => spacious ? 8 : 6;
+  double get labelGap => 4;
   double get displayHeight => spacious
       ? 122
       : compact
-      ? 88
+      ? (shortHeight ? 78 : 88)
       : 100;
   double get panelPadding => spacious
       ? 12
@@ -76,7 +55,7 @@ class PesagemLayout {
   double get sideWidth => spacious
       ? 315
       : compact
-      ? 286
+      ? (shortHeight ? 268 : 286)
       : 300;
   double get actionHeight => spacious
       ? 54

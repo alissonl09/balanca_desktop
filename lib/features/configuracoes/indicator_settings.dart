@@ -4,6 +4,9 @@ import 'dart:io';
 import 'dart:async';
 
 import '../../core/indicators/indicator_models.dart';
+import '../../core/indicators/serial_indicator_service.dart';
+import '../../core/indicators/toledo_continuous.dart';
+import '../pesagem/weighing_preview.dart' show formatIndicatorWeight;
 import 'settings_widgets.dart';
 
 /// Formulários de catálogo e instalação separados, sem transporte ou parser.
@@ -12,9 +15,13 @@ class IndicatorSettings extends StatefulWidget {
     super.key,
     required this.configuration,
     required this.models,
+    required this.serialIndicator,
+    this.loadFailed = false,
   });
   final IndicatorConfiguration configuration;
   final bool models;
+  final SerialIndicatorService serialIndicator;
+  final bool loadFailed;
   @override
   State<IndicatorSettings> createState() => _IndicatorSettingsState();
 }
@@ -23,8 +30,38 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
   String? _selected;
   bool _testing = false;
   String? _testResult;
+  List<String> _ports = [];
+  String? _portError;
+  bool _refreshingPorts = false;
   IndicatorConfiguration get config => widget.configuration;
   void change(VoidCallback callback) => config.update(callback);
+
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.models && config.installations.isNotEmpty) {
+      _selected = config.operationalId ?? config.installations.first.id;
+      unawaited(_refreshPorts());
+    }
+  }
+
+  Future<void> _refreshPorts() async {
+    if (_refreshingPorts) return;
+    setState(() {
+      _refreshingPorts = true;
+      _portError = null;
+    });
+    try {
+      final ports = await widget.serialIndicator.availablePorts();
+      if (mounted) setState(() => _ports = ports);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _portError = 'Não foi possível listar as portas COM.');
+      }
+    } finally {
+      if (mounted) setState(() => _refreshingPorts = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -92,10 +129,35 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
       children: [
         SettingsSection(
           title: 'Indicadores de Peso',
-          description: 'Configuração da instalação física · rascunho local.',
+          description: 'Selecione o modo e salve para aplicar nesta estação.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (widget.loadFailed)
+                const Text('Falha ao carregar a configuração dos indicadores.'),
+              SettingsFields(
+                children: [
+                  _choice<IndicatorMode>(
+                    'indicator-mode',
+                    'Modo de pesagem',
+                    config.mode,
+                    {for (final mode in IndicatorMode.values) mode: mode.label},
+                    (mode) => config.mode = mode,
+                  ),
+                  _choice<String>(
+                    'indicator-operational',
+                    'Indicador operacional',
+                    config.operationalId,
+                    {
+                      for (final item in config.installations)
+                        item.id:
+                            '${item.name.isEmpty ? item.id : item.name}'
+                            '${item.active ? '' : ' (inativo)'}',
+                    },
+                    (id) => config.operationalId = id,
+                  ),
+                ],
+              ),
               for (final item in config.installations)
                 ListTile(
                   title: Text(
@@ -110,19 +172,32 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
                         ? Icons.radio_button_checked
                         : Icons.radio_button_off,
                   ),
-                  onTap: () => setState(() => _selected = item.id),
+                  onTap: _testing
+                      ? null
+                      : () => setState(() {
+                          _selected = item.id;
+                          _testResult = null;
+                        }),
                 ),
               Align(
                 alignment: Alignment.centerLeft,
                 child: OutlinedButton.icon(
                   key: const ValueKey('add-indicator'),
-                  onPressed: () {
-                    final item = IndicatorInstallation(
-                      id: 'local-${config.installations.length + 1}',
-                    );
-                    change(() => config.installations.add(item));
-                    setState(() => _selected = item.id);
-                  },
+                  onPressed: _testing
+                      ? null
+                      : () {
+                          final item = IndicatorInstallation(
+                            id: 'local-${config.installations.length + 1}',
+                          );
+                          change(() {
+                            config.installations.add(item);
+                            config.operationalId ??= item.id;
+                          });
+                          setState(() {
+                            _selected = item.id;
+                            _testResult = null;
+                          });
+                        },
                   icon: const Icon(Icons.add),
                   label: const Text('Novo indicador'),
                 ),
@@ -187,7 +262,13 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
                       in model?.connectionTypes ?? <IndicatorConnectionType>[])
                     t: t.label,
                 },
-                (v) => item.connectionType = v,
+                (v) {
+                  item.selectConnectionType(v, model!);
+                  _testResult = null;
+                  if (v == IndicatorConnectionType.serial) {
+                    unawaited(_refreshPorts());
+                  }
+                },
               ),
               if (model != null && model.connectionTypes.isEmpty)
                 const Padding(
@@ -198,7 +279,7 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
                 ),
               const SizedBox(height: 16),
               KeyedSubtree(
-                key: ValueKey('${item.connectionType}'),
+                key: ValueKey(item.connectionType),
                 child: SettingsFields(
                   children: [
                     if (item.connectionType == IndicatorConnectionType.tcp) ...[
@@ -238,39 +319,37 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
                     ],
                     if (item.connectionType == IndicatorConnectionType.serial &&
                         serial != null) ...[
-                      _text(
-                        'indicator-com',
-                        'Porta COM da estação',
-                        item.windowsPort ?? '',
-                        (v) => item.windowsPort = v,
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _choice<String>(
+                            'indicator-com',
+                            'Porta COM da estação',
+                            item.comPort,
+                            {
+                              for (final port in _ports) port: port,
+                              if (item.comPort.isNotEmpty &&
+                                  !_ports.contains(item.comPort))
+                                item.comPort:
+                                    _refreshingPorts || _portError != null
+                                    ? item.comPort
+                                    : '${item.comPort} (indisponível)',
+                            },
+                            (port) => item.windowsPort = port,
+                          ),
+                          TextButton.icon(
+                            key: const ValueKey('refresh-indicator-ports'),
+                            onPressed: _refreshingPorts ? null : _refreshPorts,
+                            icon: const Icon(Icons.refresh),
+                            label: Text(
+                              _refreshingPorts
+                                  ? 'Listando portas…'
+                                  : 'Atualizar portas COM',
+                            ),
+                          ),
+                          if (_portError case final message?) Text(message),
+                        ],
                       ),
-                      if (serial.interfacesByChannel.isNotEmpty) ...[
-                        _choice<String>(
-                          'indicator-channel',
-                          'Canal do indicador (conforme instalação)',
-                          item.channel,
-                          {
-                            for (final c in serial.interfacesByChannel.keys)
-                              c: c,
-                          },
-                          (v) {
-                            item.channel = v;
-                            item.physicalInterface = null;
-                          },
-                        ),
-                        _choice<String>(
-                          'indicator-interface-${item.channel}',
-                          'Interface física',
-                          item.physicalInterface,
-                          {
-                            for (final i
-                                in serial.interfacesByChannel[item.channel] ??
-                                    <String>[])
-                              i: i,
-                          },
-                          (v) => item.physicalInterface = v,
-                        ),
-                      ],
                       _choice<int>(
                         'indicator-baud',
                         'Baud Rate',
@@ -292,6 +371,13 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
                         {for (final v in serial.parities) v: v},
                         (v) => item.parity = v,
                       ),
+                      _choice<int>(
+                        'indicator-stop-bits',
+                        'Stop Bits',
+                        item.stopBits,
+                        {for (final v in serial.stopBits) v: '$v'},
+                        (v) => item.stopBits = v,
+                      ),
                       _choice<String>(
                         'indicator-flow',
                         'Flow Control',
@@ -300,41 +386,14 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
                         (v) => item.flowControl = v,
                       ),
                     ],
-                    if (item.connectionType != null) ...[
-                      _number(
-                        'indicator-timeout',
-                        'Timeout (ms)',
-                        item.timeoutMs,
-                        (v) => item.timeoutMs = v ?? 0,
-                      ),
-                      if (item.connectionType == IndicatorConnectionType.tcp)
-                        _number(
-                          'indicator-reconnect',
-                          'Intervalo de reconexão (ms)',
-                          item.reconnectIntervalMs,
-                          (v) => item.reconnectIntervalMs = v ?? 0,
-                        ),
-                      if (item.connectionType ==
-                              IndicatorConnectionType.serial &&
-                          serial != null)
-                        _choice<int>(
-                          'indicator-stop-bits',
-                          'Stop Bits',
-                          item.stopBits,
-                          {for (final v in serial.stopBits) v: '$v'},
-                          (v) => item.stopBits = v,
-                        ),
-                      _choice<String>(
-                        'indicator-protocol',
-                        'Protocolo / Tipo de saída',
-                        item.protocol,
-                        {for (final p in model?.protocols ?? <String>[]) p: p},
-                        (v) => item.protocol = v,
-                      ),
-                    ],
+                    if (item.connectionType == IndicatorConnectionType.tcp)
+                      ..._protocolFields(item, model),
                   ],
                 ),
               ),
+              if (item.connectionType == IndicatorConnectionType.serial &&
+                  serial != null)
+                _advancedSerial(item, model!, serial),
             ],
           ),
         ),
@@ -344,9 +403,8 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                _testResult ??
-                    'Teste abre uma conexão temporária e não inicia pesagem.',
+              SelectableText(
+                _testResult ?? 'O teste recebe dados do indicador. Feche o ComTool ou a Portaria se estiverem usando a COM.',
               ),
               OutlinedButton.icon(
                 key: const ValueKey('test-indicator-connection'),
@@ -366,6 +424,94 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
       ],
     );
   }
+
+  List<Widget> _protocolFields(
+    IndicatorInstallation item,
+    IndicatorModel? model,
+  ) => [
+    _number(
+      'indicator-timeout',
+      'Timeout (ms)',
+      item.timeoutMs,
+      (v) => item.timeoutMs = v ?? 0,
+    ),
+    _number(
+      'indicator-reconnect',
+      'Intervalo de reconexão (ms)',
+      item.reconnectIntervalMs,
+      (v) => item.reconnectIntervalMs = v ?? 0,
+    ),
+    _choice<String>(
+      'indicator-protocol',
+      'Protocolo / Tipo de saída',
+      item.protocol,
+      {for (final p in model?.protocols ?? <String>[]) p: p},
+      (v) => item.protocol = v,
+    ),
+  ];
+
+  Widget _advancedSerial(
+    IndicatorInstallation item,
+    IndicatorModel model,
+    SerialCapabilities serial,
+  ) => ExpansionTile(
+    key: const ValueKey('indicator-serial-advanced'),
+    title: const Text('Configuração serial avançada'),
+    tilePadding: EdgeInsets.zero,
+    children: [
+      SettingsFields(
+        children: [
+          ..._protocolFields(item, model),
+          if (serial.interfacesByChannel.isNotEmpty) ...[
+            _choice<String>(
+              'indicator-channel',
+              'Canal do indicador',
+              item.channel,
+              {for (final c in serial.interfacesByChannel.keys) c: c},
+              (v) {
+                item.channel = v;
+                item.physicalInterface = null;
+              },
+            ),
+            _choice<String>(
+              'indicator-interface-${item.channel}',
+              'Interface física',
+              item.physicalInterface,
+              {
+                for (final i
+                    in serial.interfacesByChannel[item.channel] ?? <String>[])
+                  i: i,
+              },
+              (v) => item.physicalInterface = v,
+            ),
+          ],
+          if (item.protocol == toledoContinuousProtocol) ...[
+            _choice<ToledoWeightScale>(
+              'indicator-toledo-weight-scale',
+              'Escala do peso',
+              item.toledoWeightScale,
+              {
+                for (final scale in ToledoWeightScale.values)
+                  scale: scale.label,
+              },
+              (scale) {
+                item.toledoWeightScale = scale;
+                if (scale == ToledoWeightScale.comToolIntegerKg) {
+                  item.checksum = true;
+                }
+              },
+            ),
+            if (item.toledoWeightScale == ToledoWeightScale.standard)
+              SettingsToggle(
+                label: 'Checksum do MT Continuous',
+                value: item.checksum,
+                onChanged: (value) => change(() => item.checksum = value),
+              ),
+          ],
+        ],
+      ),
+    ],
+  );
 
   Future<void> _testConnection(
     IndicatorInstallation item,
@@ -393,7 +539,22 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
         await socket.close();
         result = 'Conectado. Comunicação estabelecida; nenhum dado foi interpretado.';
       } else {
-        result = 'Porta indisponível: transporte Serial Windows ainda não configurado.';
+        final protocolError = item.serialProtocolError;
+        if (protocolError != null) {
+          result = protocolError;
+        } else {
+          final parameters =
+              '${item.comPort} · ${item.baudRate} baud · '
+              '${item.dataBits} bits · paridade ${item.parity} · '
+              '${item.stopBits} stop bits · fluxo ${item.flowControl}\n'
+              '${item.protocol} · checksum ${item.checksum ? 'ativo' : 'inativo'} · '
+              '${item.toledoWeightScale.label} · '
+              'timeout ${item.timeoutMs} ms · reconexão ${item.reconnectIntervalMs} ms';
+          final data = await widget.serialIndicator.testConnection(item);
+          result = data == null
+              ? '$parameters\nTeste cancelado ou já em andamento.'
+              : _serialResult(parameters, data);
+        }
       }
     } on SocketException {
       result = 'Host inacessível ou porta indisponível.';
@@ -408,6 +569,27 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
         _testResult = result;
       });
     }
+  }
+
+  String _serialResult(String parameters, SerialDiagnostics data) {
+    final reading = data.reading;
+    return [
+      parameters,
+      '${reading.status.label} · porta ${data.portOpen ? 'aberta' : 'fechada'}',
+      ?reading.error,
+      'Bytes recebidos: ${data.bytesReceived} · Frames válidos: ${data.validFrames} · '
+          'Inválidos: ${data.invalidFrames}',
+      'Último frame válido: ${data.lastValidAt?.toLocal().toIso8601String() ?? '—'}',
+      if (data.lastValidReading case final valid?)
+        'Último peso válido: ${formatIndicatorWeight(valid.weight!, valid.decimalPlaces!)} ${valid.unit} · '
+            '${valid.gross! ? 'bruto' : 'líquido'} · ${valid.stable! ? 'estável' : 'instável'}',
+      if (data.lastInvalid case final error?) 'Último frame rejeitado: $error',
+      'Diagnóstico: ${data.observedAt.toLocal().toIso8601String()}',
+      if (data.sample.isNotEmpty) ...[
+        'HEX: ${data.hex}',
+        'ASCII: ${data.ascii}',
+      ],
+    ].join('\n');
   }
 
   Widget _text(
@@ -432,8 +614,6 @@ class _IndicatorSettingsState extends State<IndicatorSettings> {
     initialValue: value?.toString() ?? '',
     keyboardType: TextInputType.number,
     decoration: InputDecoration(labelText: label, helperText: helper),
-    validator: (v) =>
-        int.tryParse(v ?? '') == null ? 'Informe um número inteiro.' : null,
     onChanged: (v) => onChanged(int.tryParse(v)),
   );
   Widget _choice<T>(

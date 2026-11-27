@@ -7,19 +7,14 @@ import '../../core/widgets/visual_components.dart';
 import 'cadastro_form.dart';
 import 'cadastro_record.dart';
 import 'cadastros_memory.dart';
-import '../../core/permissions/permission_models.dart';
+import 'catalog_details.dart';
+import 'catalog_form.dart';
 
 /// Pesquisa, seleção e ações comuns às quatro abas, sem acesso a persistência.
 class CadastroPanel extends StatefulWidget {
-  const CadastroPanel({
-    super.key,
-    required this.kind,
-    required this.memory,
-    this.permissions,
-  });
+  const CadastroPanel({super.key, required this.kind, required this.memory});
   final CadastroKind kind;
   final CadastrosMemory memory;
-  final PermissionState? permissions;
 
   @override
   State<CadastroPanel> createState() => _CadastroPanelState();
@@ -29,17 +24,20 @@ class _CadastroPanelState extends State<CadastroPanel> {
   final _search = TextEditingController();
   final _scroll = ScrollController();
   String _filter = '';
-  int? _selectedCode;
+  String? _selectedId;
   bool _dialogOpen = false;
   CadastroKind get kind => widget.kind;
-  bool _allowed(AppPermission permission) =>
-      widget.permissions?.allows(permission) ?? true;
+  bool get _isDriver => kind == CadastroKind.motoristas;
+  CadastrosMemory get memory => widget.memory;
 
   List<CadastroRecord> get _results => widget.memory
       .records(kind)
       .where(
         (record) =>
-            record.code.toString().contains(_filter) ||
+            record
+                .displayCode(kind, simulated: memory.simulated)
+                .toLowerCase()
+                .contains(_filter) ||
             record.identification.toLowerCase().contains(_filter) ||
             (kind == CadastroKind.placas &&
                 widget.memory
@@ -51,40 +49,47 @@ class _CadastroPanelState extends State<CadastroPanel> {
 
   void _applySearch() => setState(() {
     _filter = _search.text.trim().toLowerCase();
-    if (!_results.any((record) => record.code == _selectedCode)) {
-      _selectedCode = null;
+    if (!_results.any((record) => record.id == _selectedId)) {
+      _selectedId = null;
     }
   });
 
-  Future<void> _edit([CadastroRecord? record]) async {
-    final permission = record == null
-        ? AppPermission.insertRegistry
-        : AppPermission.editRegistry;
-    if (!_allowed(permission)) return;
-    if (_dialogOpen) return;
-    setState(() => _dialogOpen = true);
-    final result = await showCadastroForm(
+  Future<void> _openForm({
+    CadastroRecord? record,
+    bool readOnly = false,
+  }) async {
+    final action = readOnly
+        ? CadastroAction.read
+        : record == null
+        ? CadastroAction.insert
+        : CadastroAction.edit;
+    if (_dialogOpen || memory.unavailable(kind, action) != null) return;
+    if (record != null && !memory.records(kind).contains(record)) return;
+    setState(() {
+      _dialogOpen = true;
+      if (record != null) _selectedId = record.id;
+    });
+    final form = kind.isCatalog ? showCatalogForm : showCadastroForm;
+    final result = await form(
       context,
       kind: kind,
-      memory: widget.memory,
+      memory: memory,
       record: record,
+      readOnly: readOnly,
     );
     if (!mounted) return;
     setState(() {
       _dialogOpen = false;
-      if (result != null && _allowed(permission)) {
-        widget.memory.save(kind, result);
+      if (result != null) {
         _search.clear();
         _filter = '';
-        _selectedCode = result.code;
+        _selectedId = result.id;
       }
     });
     if (result != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_scroll.hasClients) return;
-        final index = _results.indexWhere(
-          (record) => record.code == result.code,
-        );
+        final index = _results.indexWhere((record) => record.id == result.id);
         _scroll.jumpTo(
           (index * 48.0).clamp(0.0, _scroll.position.maxScrollExtent),
         );
@@ -93,25 +98,32 @@ class _CadastroPanelState extends State<CadastroPanel> {
   }
 
   Future<void> _delete(CadastroRecord record) async {
-    if (!_allowed(AppPermission.deactivateRegistry)) return;
-    if (_dialogOpen) return;
+    if (_dialogOpen ||
+        memory.unavailable(kind, CadastroAction.deactivate) != null ||
+        !memory.records(kind).contains(record)) {
+      return;
+    }
     setState(() => _dialogOpen = true);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         key: const ValueKey('cadastro-delete-confirmation'),
         scrollable: true,
-        title: const Text('Excluir registro'),
+        title: Text(kind.isCatalog ? 'Inativar registro' : 'Excluir registro'),
         content: SizedBox(
           width: 440,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Deseja realmente excluir este registro?'),
+              Text(
+                kind.isCatalog
+                    ? 'Deseja inativar este registro na demonstração?'
+                    : 'Deseja realmente excluir este registro?',
+              ),
               const SizedBox(height: 12),
               SelectableText(
-                '${record.code} - ${record.identification}',
+                '${record.displayCode(kind, simulated: memory.simulated)} - ${record.identification}',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ],
@@ -128,19 +140,22 @@ class _CadastroPanelState extends State<CadastroPanel> {
               foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Excluir'),
+            child: Text(kind.isCatalog ? 'Inativar' : 'Excluir'),
           ),
         ],
       ),
     );
     if (!mounted) return;
-    setState(() {
-      _dialogOpen = false;
-      if (confirmed == true && _allowed(AppPermission.deactivateRegistry)) {
-        widget.memory.remove(kind, record.code);
-        _selectedCode = null;
+    setState(() => _dialogOpen = false);
+    if (confirmed == true) {
+      try {
+        memory.remove(kind, record);
+        setState(() => _selectedId = null);
+      } on CadastroException catch (error) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
       }
-    });
+    }
   }
 
   @override
@@ -156,31 +171,73 @@ class _CadastroPanelState extends State<CadastroPanel> {
       record.city,
       record.uf,
     ].where((text) => text.isNotEmpty).join(' / '),
-    CadastroKind.motoristas =>
-      record.driverLink == DriverLink.autonomo
-          ? 'Autônomo'
-          : widget.memory.carrierName(record.carrierCode),
+    CadastroKind.motoristas => record.city,
     CadastroKind.placas => widget.memory.carrierName(record.carrierCode),
+    _ => '',
   };
 
   String get _detailLabel => switch (kind) {
     CadastroKind.remetentes => 'Tipo',
     CadastroKind.transportadoras => 'Cidade / UF',
-    CadastroKind.motoristas => 'Vínculo / Transportadora',
+    CadastroKind.motoristas => 'Cidade',
     CadastroKind.placas => 'Transportadora',
+    _ => '',
   };
+
+  List<String> get _catalogHeaders => switch (kind) {
+    CadastroKind.operacoes => ['Natureza', 'Situação'],
+    CadastroKind.tolerancias => [
+      'Calcula tolerância',
+      'Tipo',
+      'Quebra',
+      'Renda',
+      'Situação',
+    ],
+    CadastroKind.complementos => ['Tipo', 'Situação'],
+    _ => ['Situação'],
+  };
+
+  List<String> _catalogColumns(CadastroRecord record) {
+    final details = record.catalog;
+    String value(double? number, ToleranceUnit? unit) => number == null
+        ? '—'
+        : '${number.toString().replaceAll('.', ',')} ${unit?.symbol ?? ''}'
+              .trim();
+    return [
+      if (kind == CadastroKind.operacoes)
+        details is OperationDetails ? details.nature.label : '—',
+      if (kind == CadastroKind.tolerancias) ...[
+        details is ToleranceDetails
+            ? (details.calculates ? 'Sim' : 'Não')
+            : '—',
+        details is ToleranceDetails && details.calculates
+            ? details.unit?.label ?? '—'
+            : '—',
+        details is ToleranceDetails && details.calculates
+            ? value(details.loss, details.unit)
+            : '—',
+        details is ToleranceDetails && details.calculates
+            ? value(details.yield, details.unit)
+            : '—',
+      ],
+      if (kind == CadastroKind.complementos)
+        details is AttributeDetails ? details.type.label : '—',
+      record.active ? 'Ativo' : 'Inativo',
+    ];
+  }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: Listenable.merge([
-      widget.memory,
-      if (widget.permissions != null) widget.permissions!,
-    ]),
+    animation: Listenable.merge([memory, memory.permissions]),
     builder: (context, _) {
       final records = _results;
       final selected = records
-          .where((record) => record.code == _selectedCode)
+          .where((record) => record.id == _selectedId)
           .firstOrNull;
+      final readReason = memory.unavailable(kind, CadastroAction.read);
+      final insertReason = memory.unavailable(kind, CadastroAction.insert);
+      final editReason = memory.unavailable(kind, CadastroAction.edit);
+      final deleteReason = memory.unavailable(kind, CadastroAction.deactivate);
       return VisualCard(
         padding: const EdgeInsets.all(14),
         radius: 9,
@@ -191,43 +248,60 @@ class _CadastroPanelState extends State<CadastroPanel> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                ElevatedButton.icon(
-                  key: const ValueKey('cadastro-insert'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.green,
-                    foregroundColor: Colors.white,
+                if (kind.isCatalog)
+                  OutlinedButton.icon(
+                    key: const ValueKey('cadastro-consult'),
+                    onPressed:
+                        _dialogOpen || selected == null || readReason != null
+                        ? null
+                        : () => _openForm(record: selected, readOnly: true),
+                    icon: const Icon(Icons.visibility_outlined, size: 18),
+                    label: const Text('Consultar'),
                   ),
-                  onPressed:
-                      _dialogOpen || !_allowed(AppPermission.insertRegistry)
-                      ? null
-                      : () => _edit(),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Inserir'),
-                ),
-                OutlinedButton.icon(
-                  key: const ValueKey('cadastro-edit'),
-                  onPressed:
-                      _dialogOpen ||
-                          selected == null ||
-                          !_allowed(AppPermission.editRegistry)
-                      ? null
-                      : () => _edit(selected),
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  label: const Text('Alterar'),
-                ),
-                OutlinedButton.icon(
-                  key: const ValueKey('cadastro-delete'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xffc62828),
+                _withReason(
+                  insertReason,
+                  ElevatedButton.icon(
+                    key: const ValueKey('cadastro-insert'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _dialogOpen || insertReason != null
+                        ? null
+                        : () => _openForm(),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Inserir'),
                   ),
-                  onPressed:
-                      _dialogOpen ||
-                          selected == null ||
-                          !_allowed(AppPermission.deactivateRegistry)
-                      ? null
-                      : () => _delete(selected),
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  label: const Text('Excluir'),
+                ),
+                _withReason(
+                  editReason,
+                  OutlinedButton.icon(
+                    key: const ValueKey('cadastro-edit'),
+                    onPressed:
+                        _dialogOpen || selected == null || editReason != null
+                        ? null
+                        : () => _openForm(record: selected),
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    label: const Text('Alterar'),
+                  ),
+                ),
+                _withReason(
+                  deleteReason,
+                  OutlinedButton.icon(
+                    key: const ValueKey('cadastro-delete'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xffc62828),
+                    ),
+                    onPressed:
+                        _dialogOpen ||
+                            selected == null ||
+                            deleteReason != null ||
+                            (kind.isCatalog && !selected.active)
+                        ? null
+                        : () => _delete(selected),
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    label: Text(kind.isCatalog ? 'Inativar' : 'Excluir'),
+                  ),
                 ),
               ],
             );
@@ -263,12 +337,19 @@ class _CadastroPanelState extends State<CadastroPanel> {
                     child: TextField(
                       key: const ValueKey('cadastro-search'),
                       controller: _search,
+                      enabled: readReason == null,
                       style: const TextStyle(fontSize: 14),
                       onSubmitted: (_) => _applySearch(),
                       decoration: InputDecoration(
-                        hintText: kind == CadastroKind.placas
-                            ? 'Pesquisar por código, placa ou transportadora'
-                            : 'Pesquisar por código ou nome',
+                        hintText: switch (kind) {
+                          CadastroKind.placas =>
+                            'Pesquisar por código, placa ou transportadora',
+                          CadastroKind.motoristas =>
+                            'Pesquisar por matrícula ou nome',
+                          _ when kind.isCatalog =>
+                            'Pesquisar por código ou descrição',
+                          _ => 'Pesquisar por código ou nome',
+                        },
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 10,
@@ -279,7 +360,7 @@ class _CadastroPanelState extends State<CadastroPanel> {
                         ),
                         suffixIcon: IconButton(
                           tooltip: 'Pesquisar cadastro',
-                          onPressed: _applySearch,
+                          onPressed: readReason == null ? _applySearch : null,
                           icon: const Icon(
                             Icons.search,
                             size: 20,
@@ -304,30 +385,57 @@ class _CadastroPanelState extends State<CadastroPanel> {
                   ),
                   child: Row(
                     children: [
-                      const SizedBox(
-                        width: 66,
+                      SizedBox(
+                        width: _isDriver ? 100 : 66,
                         child: Text(
-                          'Código',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          kind == CadastroKind.placas ? 'Placa' : 'Nome',
+                          _isDriver ? 'Matrícula' : 'Código',
                           style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                       ),
-                      if (constraints.maxWidth >= 600)
+                      Expanded(
+                        flex: kind.isCatalog ? 2 : 1,
+                        child: Text(
+                          kind.isCatalog
+                              ? 'Descrição'
+                              : kind == CadastroKind.placas
+                              ? 'Placa'
+                              : 'Nome',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      if (kind.isCatalog)
+                        for (final label in _catalogHeaders)
+                          Expanded(
+                            child: Text(
+                              label,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          )
+                      else if (_isDriver || constraints.maxWidth >= 600)
                         Expanded(
                           child: Text(
                             _detailLabel,
                             style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      if (_isDriver)
+                        const SizedBox(
+                          width: 44,
+                          child: Text(
+                            'UF',
+                            style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
                             ),
@@ -343,10 +451,14 @@ class _CadastroPanelState extends State<CadastroPanel> {
                     math.max(112.0, MediaQuery.sizeOf(context).height - 590),
                   ),
                   child: records.isEmpty
-                      ? const Center(
+                      ? Center(
                           child: Text(
-                            'Nenhum registro encontrado.',
-                            style: TextStyle(color: AppColors.muted),
+                            readReason ??
+                                (!memory.simulated &&
+                                        memory.records(kind).isEmpty
+                                    ? 'Nenhum dado oficial disponível.'
+                                    : 'Nenhum registro encontrado.'),
+                            style: const TextStyle(color: AppColors.muted),
                           ),
                         )
                       : Scrollbar(
@@ -358,7 +470,7 @@ class _CadastroPanelState extends State<CadastroPanel> {
                             itemExtent: 48,
                             itemBuilder: (context, index) {
                               final record = records[index];
-                              final isSelected = selected?.code == record.code;
+                              final isSelected = selected?.id == record.id;
                               final detail = _detail(record);
                               return Semantics(
                                 selected: isSelected,
@@ -368,11 +480,16 @@ class _CadastroPanelState extends State<CadastroPanel> {
                                       : Colors.white,
                                   child: InkWell(
                                     key: ValueKey(
-                                      'cadastro-row-${kind.name}-${record.code}',
+                                      'cadastro-row-${kind.name}-${record.id}',
                                     ),
-                                    onTap: () => setState(
-                                      () => _selectedCode = record.code,
-                                    ),
+                                    onTap: () =>
+                                        setState(() => _selectedId = record.id),
+                                    onDoubleTap: _isDriver || kind.isCatalog
+                                        ? () => _openForm(
+                                            record: record,
+                                            readOnly: true,
+                                          )
+                                        : null,
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 9,
@@ -393,15 +510,16 @@ class _CadastroPanelState extends State<CadastroPanel> {
                                       child: Row(
                                         children: [
                                           SizedBox(
-                                            width: 66,
-                                            child: Text(
-                                              '${record.code}',
-                                              style: const TextStyle(
-                                                fontSize: 14,
+                                            width: _isDriver ? 100 : 66,
+                                            child: _cell(
+                                              record.displayCode(
+                                                kind,
+                                                simulated: memory.simulated,
                                               ),
                                             ),
                                           ),
                                           Expanded(
+                                            flex: kind.isCatalog ? 2 : 1,
                                             child: Column(
                                               mainAxisAlignment:
                                                   MainAxisAlignment.center,
@@ -412,15 +530,29 @@ class _CadastroPanelState extends State<CadastroPanel> {
                                                   record.identification,
                                                   bold: isSelected,
                                                 ),
-                                                if (constraints.maxWidth <
+                                                if (!_isDriver &&
+                                                    constraints.maxWidth <
                                                         600 &&
                                                     detail.isNotEmpty)
                                                   _cell(detail, muted: true),
                                               ],
                                             ),
                                           ),
-                                          if (constraints.maxWidth >= 600)
+                                          if (kind.isCatalog)
+                                            for (final cell in _catalogColumns(
+                                              record,
+                                            ))
+                                              Expanded(
+                                                child: _cell(cell, muted: true),
+                                              )
+                                          else if (_isDriver ||
+                                              constraints.maxWidth >= 600)
                                             Expanded(child: _cell(detail)),
+                                          if (_isDriver)
+                                            SizedBox(
+                                              width: 44,
+                                              child: _cell(record.uf),
+                                            ),
                                         ],
                                       ),
                                     ),
@@ -433,7 +565,9 @@ class _CadastroPanelState extends State<CadastroPanel> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '${records.length} registro(s) • Dados temporários, somente nesta sessão.',
+                  memory.simulated
+                      ? '${records.length} registro(s) • Dados simulados, somente nesta sessão.'
+                      : '${records.length} registro(s) • Consulta de dados oficiais disponíveis.',
                   style: const TextStyle(fontSize: 12, color: AppColors.muted),
                 ),
               ],
@@ -443,6 +577,9 @@ class _CadastroPanelState extends State<CadastroPanel> {
       );
     },
   );
+
+  Widget _withReason(String? reason, Widget child) =>
+      reason == null ? child : Tooltip(message: reason, child: child);
 
   Widget _cell(String value, {bool bold = false, bool muted = false}) =>
       Tooltip(

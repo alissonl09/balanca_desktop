@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:balanca_desktop/core/widgets/visual_components.dart';
+import 'package:balanca_desktop/core/libra/pre_ticket_dto.dart';
 
 import 'package:balanca_desktop/app/balanca_app.dart';
 import 'package:balanca_desktop/features/pesagem/operation_lookup.dart';
@@ -111,6 +112,21 @@ void main() {
     expect(ticket.issuedAt, emitted);
   });
 
+  test('Peso da nota distingue decimal da Libra do milhar digitado', () {
+    final settings = SettingsState();
+    addTearDown(settings.dispose);
+    const value = {invoiceWeightField: '12.345'};
+    final manual = session(operation: value);
+    final integrated = session(operation: value)
+      ..officialOperation = value
+      ..preTickets = [
+        PreTicketDto.fromJson({'quantidadeTotal': 12.345}),
+      ];
+
+    expect(ticketFromSession(manual, settings).invoiceWeight, 12345);
+    expect(ticketFromSession(integrated, settings).invoiceWeight, 12.345);
+  });
+
   test(
     'Fechamento preserva as duas pesagens e o líquido calculado no estado',
     () {
@@ -122,7 +138,6 @@ void main() {
           first: first,
           second: second,
           net: first - second,
-          dry: 19000,
           firstWeighedAt: at1,
           secondWeighedAt: at2,
         ),
@@ -140,7 +155,12 @@ void main() {
       expect(ticket.netWeight, 19500);
       expect(ticketWeight(ticket.netWeight!), '19.500 Kg');
       expect(ticketWeight(1234.5), '1.234,5 Kg');
-      expect(ticket.dryWeight, 19000);
+      expect(ticket.dryWeight, isNull);
+      final legacy = TicketPesagem.fromJson({
+        ...ticket.toJson(),
+        'dryWeight': 19000,
+      });
+      expect(legacy.dryWeight, 19000);
       expect(ticket.trailerPlate, 'DEF4G56');
       expect(ticket.issuedAt, isNot(ticket.secondWeighedAt));
     },
@@ -245,6 +265,15 @@ void main() {
     expect(ticketFromSession(source, SettingsState()).firstWeight, isNull);
   });
 
+  test('Ticket preserva um peso líquido de zero quando calculado', () {
+    final source = session(
+      summary: const WeighingSummary(first: 32000, second: 32000, net: 0),
+    );
+    final settings = SettingsState();
+    addTearDown(settings.dispose);
+    expect(ticketFromSession(source, settings).netWeight, 0);
+  });
+
   test('Identificador é substituível e Code 39 possui delimitadores e zonas de silêncio', () {
     final source = session();
     expect(ticketFromSession(source, SettingsState()).traceabilityId, '318875');
@@ -270,7 +299,117 @@ void main() {
     expect(() => encodeCode39('inválido'), throwsFormatException);
   });
 
+  test(
+    'Impressão real usa a numeração oficial e preserva zeros à esquerda',
+    () {
+      final settings = SettingsState();
+      addTearDown(settings.dispose);
+      final printing = PrintSettings();
+      final withNumber = ticketFromSession(
+        TicketSession(ticketNumber: '000123'),
+        settings,
+        savedPrinting: printing,
+      );
+      expect(withNumber.printableNumber, '000123');
+      expect(
+        withNumber.branding.companyName,
+        TicketBranding.defaultCompanyName,
+      );
+      final withoutNumber = ticketFromSession(
+        TicketSession(),
+        settings,
+        savedPrinting: printing,
+      );
+      expect(withoutNumber.printableNumber, isNull);
+    },
+  );
+
+  testWidgets(
+    'Nome fica centralizado ao lado da logomarca e barras usam o número exibido',
+    (tester) async {
+      final ticket = TicketPesagem(
+        ticketNumber: '000123',
+        traceabilityId: 'REFERENCIA-INTERNA',
+        issuedAt: emitted,
+        captureType: TicketCaptureType.automatic,
+        branding: TicketBranding(),
+      );
+      await render(tester, ticket);
+      final logo = find.byType(TicketPaperLogo);
+      final company = find.text(TicketBranding.defaultCompanyName);
+      expect(
+        tester.getTopLeft(company).dx,
+        greaterThan(tester.getTopRight(logo).dx),
+      );
+      expect(
+        tester.getCenter(company).dy,
+        closeTo(tester.getCenter(logo).dy, 0.1),
+      );
+      expect(tester.widget<Text>(company).textAlign, TextAlign.center);
+      final number = tester.widget<Text>(
+        find.byKey(const ValueKey('ticket-number')),
+      );
+      expect(
+        tester.widget<TicketBarcode>(find.byType(TicketBarcode)).value,
+        number.data,
+      );
+      expect(find.byKey(const ValueKey('ticket-barcode')), findsOneWidget);
+    },
+  );
+
   for (final a4 in [false, true]) {
+    testWidgets(
+      '${a4 ? 'A4' : 'Térmico'}: placas lado a lado e medições alinhadas por linha',
+      (tester) async {
+        final ticket = TicketPesagem(
+          ticketNumber: '000123',
+          documents: ['NF-12345'],
+          tractorPlate: 'ABC1D23',
+          trailerPlate: 'DEF4G56',
+          firstWeighedAt: DateTime(2026, 11, 24, 9, 10, 11),
+          secondWeighedAt: DateTime(2026, 11, 25, 10, 20, 30),
+          firstWeight: 32000,
+          secondWeight: 12500,
+          netWeight: 19500,
+          issuedAt: emitted,
+          captureType: TicketCaptureType.automatic,
+          branding: TicketBranding(),
+        );
+        await render(tester, ticket, a4: a4);
+
+        for (final (left, right) in [
+          ('ABC1D23', 'DEF4G56'),
+          ('24/11/2026', '25/11/2026'),
+          ('09:10:11', '10:20:30'),
+          ('32.000 Kg', '12.500 Kg'),
+        ]) {
+          final leftCenter = tester.getCenter(find.text(left));
+          final rightCenter = tester.getCenter(find.text(right));
+          expect(leftCenter.dx, lessThan(rightCenter.dx));
+          expect(leftCenter.dy, closeTo(rightCenter.dy, 0.1));
+        }
+        expect(
+          tester.getSize(find.text('NF-12345')).width,
+          greaterThan(tester.getSize(find.text('ABC1D23')).width),
+        );
+        expect(
+          tester.getTopLeft(find.text('19.500 Kg')).dy,
+          greaterThanOrEqualTo(
+            tester
+                .getBottomLeft(
+                  find.byKey(const ValueKey('ticket-weighing-grid')),
+                )
+                .dy,
+          ),
+        );
+        expect(
+          tester.widget<TicketBarcode>(find.byType(TicketBarcode)).value,
+          '000123',
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets(
       '${a4 ? 'A4' : 'Térmico'}: abertura/fechamento, carreta opcional e identificação manual',
       (tester) async {
@@ -322,10 +461,10 @@ void main() {
           final text = tester.widget<Text>(finder);
           expect(text.maxLines, isNull);
           expect(text.overflow, isNot(TextOverflow.ellipsis));
-          expect(tester.getSize(finder).height, greaterThan(200));
+          expect(tester.getSize(finder).height, greaterThan(30));
           expect(
             tester.getSize(finder).width,
-            lessThanOrEqualTo(a4 ? 308 : 300),
+            lessThanOrEqualTo(a4 ? 640 : 300),
           );
         }
         expect(find.text('$longText\nSegunda linha completa.'), findsOneWidget);

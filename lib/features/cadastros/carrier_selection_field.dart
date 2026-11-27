@@ -28,9 +28,10 @@ class CarrierSelectionField extends StatelessWidget {
           context: context,
           builder: (_) => _CarrierPicker(memory: memory),
         );
-        if (carrier == null || !context.mounted) return;
-        field.didChange(carrier.code);
-        onChanged(carrier.code);
+        final code = carrier?.code;
+        if (code == null || !context.mounted) return;
+        field.didChange(code);
+        onChanged(code);
       }
 
       final carrier = memory.carrier(field.value);
